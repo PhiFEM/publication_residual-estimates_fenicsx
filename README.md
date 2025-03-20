@@ -22,8 +22,6 @@ It contains also some python libraries dependencies.
 
 ### Install and launch the residual-phifem container
 
-Replace `YOUR_ENGINE` by `docker`, `podman` or your favorite container engine (the following instructions are using Docker/podman UI).
-
 1) Clone this repository in a dedicated directory:
    
    ```bash
@@ -34,15 +32,15 @@ Replace `YOUR_ENGINE` by `docker`, `podman` or your favorite container engine (t
 2) Download the image from the docker.io registry, in the main directory:
    
    ```bash
-   export CONTAINER_ENGINE=YOUR_ENGINE
+   export CONTAINER_ENGINE=docker
    cd residual-phifem
-   bash pull_image.sh
+   sudo -E bash pull_image.sh
    ```
 
 3) Launch the container:
 
    ```bash
-   bash run_image.sh
+   sudo -E bash run_image.sh
    ```
 
 ### Generate all the results at once
@@ -157,10 +155,10 @@ Please use the issue tracker to report any issues.
 
 ## Authors (alphabetical)
 
-Roland Becker, Université de Pau et des Pays de l'Adour  
-Raphaël Bulle, Inria Nancy Grand-Est  
-Michel Duprez, Inria Nancy Grand-Est  
-Vanessa Lleras, Université de Montpellier
+[Roland Becker](https://lma-umr5142.univ-pau.fr/fr/organisation/membres/cv_-becker-fr.html), Université de Pau et des Pays de l'Adour  
+[Raphaël Bulle](https://rbulle.github.io/), Inria Nancy Grand-Est  
+[Michel Duprez](https://michelduprez.fr/), Inria Nancy Grand-Est  
+[Vanessa Lleras](https://vanessalleras.wixsite.com/lleras), Université de Montpellier
 
 ## License
 
