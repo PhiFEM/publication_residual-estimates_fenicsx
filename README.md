@@ -26,7 +26,7 @@ It contains also some python libraries dependencies.
    
    ```bash
    mkdir residual-phifem/
-   git clone https://github.com/PhiFEM/residual-a-posteriori-error-estimate.git residual-phifem
+   git clone https://github.com/PhiFEM/publication_residual-estimates_fenicsx.git residual-phifem
    ```
 
 2) Download the image from the docker.io registry, in the main directory:
