@@ -23,3 +23,4 @@ boundary_detection_degree: 4
 quadrature_degree: null
 stabilization_parameter: 1.0
 save_output: true
+boundary_refinement_type: "h"

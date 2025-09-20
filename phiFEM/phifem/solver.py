@@ -116,7 +116,7 @@ class GenericSolver:
     
         self.solution_wh = dfx.fem.Function(self.FE_space)
         self.petsc_solver.setOperators(self.A)
-        self.petsc_solver.solve(self.b, self.solution_wh.vector)
+        self.petsc_solver.solve(self.b, self.solution_wh.x.petsc_vec)
     
     def compute_exact_error(self,
                             results_saver: ResultsSaver,
@@ -828,7 +828,7 @@ class PhiFEMSolver(GenericSolver):
             num_cells = working_mesh.topology.index_map(working_mesh.topology.dim).size_global
             dummy_mesh = dfx.mesh.create_submesh(working_mesh, working_mesh.topology.dim, np.arange(num_cells))[0]
             dummy_mesh.topology.create_entities(dummy_mesh.topology.dim - 1)
-            correction_mesh = dfx.mesh.refine(dummy_mesh, cut_facets)
+            correction_mesh = dfx.mesh.refine(dummy_mesh, cut_facets)[0]
 
             CGhfElement = element("Lagrange",
                                   correction_mesh.topology.cell_name(),
@@ -839,14 +839,16 @@ class PhiFEMSolver(GenericSolver):
                                             0)
             V0_correction = dfx.fem.functionspace(correction_mesh, DG0Element_correction)
             v0_correction = dfx.fem.Function(V0_correction)
+            cdim = correction_mesh.topology.dim
+            correction_cells = np.arange(correction_mesh.topology.index_map(cdim).size_global).astype(np.int32)
 
-            nmm_V0 = dfx.fem.create_nonmatching_meshes_interpolation_data(
-                                correction_mesh,
-                                V0_correction.element,
-                                working_mesh,
+            nmm_V0 = dfx.fem.create_interpolation_data(
+                                V0_correction,
+                                V0,
+                                correction_cells,
                                 padding=1.e-14)
 
-            v0_correction.interpolate(v0, nmm_interpolation_data=nmm_V0)
+            v0_correction.interpolate_nonmatching(v0, interpolation_data=nmm_V0)
 
             cdim = correction_mesh.topology.dim
             vdim = 0
