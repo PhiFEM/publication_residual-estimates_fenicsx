@@ -1,7 +1,9 @@
 import argparse
 import os
+import shutil
 import sys
 
+import adios4dolfinx
 import dolfinx as dfx
 import numpy as np
 import polars as pl
@@ -12,7 +14,7 @@ from dolfinx.fem.petsc import assemble_matrix, assemble_vector
 from mpi4py import MPI
 from petsc4py import PETSc
 from phifem.mesh_scripts import compute_tags_measures
-from utils import save_function
+from utils import compute_boundary_correction, read_function, save_function
 
 parent_dir = os.path.dirname(__file__)
 
@@ -47,10 +49,15 @@ box_mode = mesh_type == "bg"
 
 source_dir = os.path.join(parent_dir, demo)
 output_dir = os.path.join(source_dir, "output_phifem_" + refinement + "_" + mesh_type)
+checkpoint_dir = os.path.join(output_dir, "checkpoints")
 
-if not os.path.isdir(output_dir):
-    print(f"{output_dir} directory not found, we create it.")
-    os.mkdir(output_dir)
+if os.path.isdir(checkpoint_dir):
+    shutil.rmtree(checkpoint_dir)
+
+for dir_path in [output_dir, checkpoint_dir]:
+    if not os.path.isdir(dir_path):
+        print(f"{dir_path} directory not found, we create it.")
+        os.mkdir(dir_path)
 
 sys.path.append(source_dir)
 
@@ -60,7 +67,7 @@ try:
     from data import detection_levelset
 except ImportError:
     print(
-        "Didn't find detection_levelset for the specified demo, using levelset insead."
+        "Didn't find detection_levelset for the specified demo, using levelset instead."
     )
     detection_levelset = levelset
 
@@ -75,12 +82,12 @@ with open(os.path.join(source_dir, "parameters.yaml"), "rb") as f:
 
 initial_mesh_size = parameters["initial_mesh_size"]
 iterations_num = parameters["iterations_number"]
-fe_degree = parameters["fe_degree"]
+fe_degree = parameters["finite_element_degree"]
 levelset_degree = parameters["levelset_degree"]
 solution_degree = parameters["solution_degree"]
-detection_degree = parameters["detection_degree"]
+detection_degree = parameters["boundary_detection_degree"]
 stab_coef = parameters["stabilization_coefficient"]
-dorfler_param = parameters["dorfler_parameter"]
+dorfler_param = parameters["marking_parameter"]
 bbox = parameters["bbox"]
 
 # Create background mesh
@@ -92,21 +99,30 @@ mesh = dfx.mesh.create_rectangle(
     MPI.COMM_WORLD, np.asarray(bbox).T, [nx, ny], cell_type
 )
 
-results = {"dof": [], "H10_estimator": [], "eta_T": [], "eta_E": [], "eta_eps": []}
-
-if exact_sol_available:
-    results["H10 error"] = []
+results = {
+    "iteration": [],
+    "dof": [],
+    "H10_estimator": [],
+    "eta_T": [],
+    "eta_E": [],
+    "eta_eps": [],
+}
 
 for i in range(iterations_num):
-    if box_mode:
-        cells_tags, facets_tags, _, ds, _, _ = compute_tags_measures(
-            mesh, levelset, detection_degree, box_mode=box_mode
-        )
-    else:
-        cells_tags, facets_tags, mesh, _, _, _ = compute_tags_measures(
-            mesh, levelset, detection_degree, box_mode=box_mode
-        )
-        ds = ufl.Measure("ds", domain=mesh)
+    try:
+        if box_mode:
+            cells_tags, facets_tags, _, ds, _, _ = compute_tags_measures(
+                mesh, levelset, detection_degree, box_mode=box_mode
+            )
+        else:
+            cells_tags, facets_tags, mesh, _, _, _ = compute_tags_measures(
+                mesh, levelset, detection_degree, box_mode=box_mode
+            )
+            ds = ufl.Measure("ds", domain=mesh)
+    except ValueError:
+        break
+
+    results["iteration"].append(i)
 
     dx = ufl.Measure("dx", domain=mesh, subdomain_data=cells_tags)
     dS = ufl.Measure("dS", domain=mesh, subdomain_data=facets_tags)
@@ -211,6 +227,10 @@ for i in range(iterations_num):
         solution_u, os.path.join(output_dir, f"solution_u_{str(i).zfill(2)}.xdmf")
     )
 
+    checkpoint_file = os.path.join(checkpoint_dir, f"checkpoint_{str(i).zfill(2)}.bp")
+    adios4dolfinx.write_mesh(checkpoint_file, mesh)
+    adios4dolfinx.write_function(checkpoint_file, solution_u, name="solution")
+
     # Residual error estimation
     k = solution_u.function_space.element.basix_element.degree
     quadrature_degree_cells = max(0, k - 2)
@@ -259,10 +279,27 @@ for i in range(iterations_num):
     print(df)
     df.write_csv(os.path.join(output_dir, "results.csv"))
 
+    norm_h10_local = (
+        h_T ** (-2)
+        * ufl.inner(ufl.grad(solution_u), ufl.grad(solution_u))
+        * w0
+        * dx((1, 2))
+    )
+
+    norm_h10_form = dfx.fem.form(norm_h10_local)
+    norm_h10_vec = assemble_vector(norm_h10_form)
+
+    norm_h10_h = dfx.fem.Function(dg0_space)
+    norm_h10_h.x.array[:] = norm_h10_vec.array[:]
+
+    save_function(
+        norm_h10_h, os.path.join(output_dir, f"norm_H10_{str(i).zfill(2)}.xdmf")
+    )
+
     # Marking and refinement
     if i < iterations_num - 1:
         if refinement == "adap":
-            eta_global = results["H10_estimator"][-1]
+            eta_global = e_h.x.array.sum()
             cutoff = dorfler_param * eta_global
 
             sorted_cells = np.argsort(e_h.x.array)[::-1]
@@ -284,3 +321,74 @@ for i in range(iterations_num):
             mesh = dfx.mesh.refine(mesh, facets_indices)[0]
         elif refinement == "unif":
             mesh = dfx.mesh.refine(mesh)[0]
+
+results["Reference_error"] = [np.nan] * i
+if exact_sol_available:
+    fine_space = fe_space
+    fine_solution = dfx.fem.Function(fine_space)
+    fine_solution.interpolate(exact_solution)
+
+gap = 3
+for j in range(i - 3):
+
+    def checkpoint_file(k):
+        return os.path.join(checkpoint_dir, f"checkpoint_{str(k).zfill(2)}.bp")
+
+    coarse_mesh = adios4dolfinx.read_mesh(checkpoint_file(j), comm=MPI.COMM_WORLD)
+    coarse_space = dfx.fem.functionspace(coarse_mesh, fe_element)
+    coarse_solution = dfx.fem.Function(coarse_space)
+    adios4dolfinx.read_function(checkpoint_file(j), coarse_solution, name="solution")
+    if not exact_sol_available:
+        fine_mesh = adios4dolfinx.read_mesh(
+            checkpoint_file(j + gap), comm=MPI.COMM_WORLD
+        )
+        fine_space = dfx.fem.functionspace(fine_mesh, fe_element)
+        fine_solution = dfx.fem.Function(fine_space)
+        adios4dolfinx.read_function(
+            checkpoint_file(j + gap), fine_solution, name="solution"
+        )
+    dg0_fine_space = dfx.fem.functionspace(fine_mesh, dg0_element)
+    tdim = fine_mesh.topology.dim
+    fine_cells = fine_mesh.topology.index_map(tdim).size_global
+    nmm = dfx.fem.create_interpolation_data(
+        fine_space, coarse_space, np.arange(fine_cells), padding=1.0e-14
+    )
+    cf_solution = dfx.fem.Function(fine_space)
+    coarse_cells = coarse_mesh.topology.index_map(tdim).size_global
+    cf_solution.interpolate_nonmatching(coarse_solution, np.arange(fine_cells), nmm)
+
+    save_function(
+        cf_solution, os.path.join(output_dir, f"cf_solution_{str(j).zfill(2)}.xdmf")
+    )
+    diff = dfx.fem.Function(fine_space)
+    diff.x.array[:] = fine_solution.x.array[:] - cf_solution.x.array[:]
+
+    save_function(
+        diff, os.path.join(output_dir, f"reference_diff_{str(j).zfill(2)}.xdmf")
+    )
+
+    cells_tags = compute_tags_measures(
+        fine_mesh, levelset, detection_degree, box_mode=box_mode
+    )[0]
+
+    dx_fine = ufl.Measure("dx", domain=fine_mesh, subdomain_data=cells_tags)
+    fine_v0 = ufl.TestFunction(dg0_fine_space)
+    grad_diff = ufl.grad(diff)
+    h10_norm_diff = ufl.inner(grad_diff, grad_diff) * fine_v0 * dx_fine((1, 2))
+    h10_norm_form = dfx.fem.form(h10_norm_diff)
+    print("Assemble h10 norm")
+    h10_norm_vec = assemble_vector(h10_norm_form)
+    print("Post assembly")
+
+    h10_norm_h = dfx.fem.Function(dg0_fine_space)
+    h10_norm_h.x.array[:] = h10_norm_vec.array[:]
+
+    save_function(
+        h10_norm_h, os.path.join(output_dir, f"reference_error_{str(j).zfill(2)}.xdmf")
+    )
+
+    results["Reference_error"][j] = np.sqrt(h10_norm_vec.array.sum())
+
+    df = pl.DataFrame(results)
+    print(df)
+    df.write_csv(os.path.join(output_dir, "results.csv"))

@@ -1,3 +1,5 @@
+adios4dolfinx
+matplotlib
 phifem
 polars
 Pyaml
