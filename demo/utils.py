@@ -1,12 +1,11 @@
-import adios4dolfinx
 import dolfinx as dfx
 import numpy as np
 import ufl
 from basix.ufl import element
 from dolfinx.cpp.refinement import RefinementOption
-from dolfinx.fem.petsc import assemble_vector
+from dolfinx.fem.petsc import assemble_matrix, assemble_vector
 from dolfinx.io import XDMFFile
-from mpi4py import MPI
+from petsc4py import PETSc
 
 
 def _reshape_facets_map(f2c_connect):
@@ -32,6 +31,10 @@ def _reshape_facets_map(f2c_connect):
     f2c_map[mask, 0] = f2c_array[num_cells_per_facet.cumsum()[mask] - 2]
     f2c_map[mask, 1] = f2c_array[num_cells_per_facet.cumsum()[mask] - 1]
     return f2c_map
+
+
+def delta(u):
+    return ufl.div(ufl.grad(u))
 
 
 def save_function(fct: dfx.fem.Function, file_path: str):
@@ -66,7 +69,14 @@ def save_function(fct: dfx.fem.Function, file_path: str):
 
 
 def compute_boundary_local_estimators(
-    coarse_mesh, solution_w, levelset, phih, cells_tags, facets_tags, padding=1.0e-14
+    coarse_mesh,
+    solution_w,
+    levelset,
+    phih,
+    cells_tags,
+    facets_tags,
+    dual=False,
+    padding=1.0e-14,
 ):
     facets_to_refine = np.union1d(facets_tags.find(2), facets_tags.find(3))
     facets_to_refine = np.union1d(facets_to_refine, facets_tags.find(4))
@@ -78,6 +88,7 @@ def compute_boundary_local_estimators(
     # Mark the cells to refine in the coarse mesh
     dummy_mesh.topology.create_entities(dummy_mesh.topology.dim - 1)
     fdim = cdim - 1
+    coarse_mesh.topology.create_connectivity(fdim, cdim)
     f2c_connect_dummy = coarse_mesh.topology.connectivity(fdim, cdim)
     f2c_map_dummy = _reshape_facets_map(f2c_connect_dummy)
     cells_to_refine = f2c_map_dummy[facets_to_refine]
@@ -137,7 +148,13 @@ def compute_boundary_local_estimators(
     dx = ufl.Measure("dx", domain=fine_mesh, subdomain_data=fine_cells_tags)
     v0 = ufl.TestFunction(dg0_fine_space)
     grad_correction = ufl.grad(correction_function_fine)
-    h10_norm_correction = ufl.inner(grad_correction, grad_correction) * v0 * dx(2)
+    if dual:
+        measure_ind = (1, 2)
+    else:
+        measure_ind = (1, 2)
+    h10_norm_correction = (
+        ufl.inner(grad_correction, grad_correction) * v0 * dx(measure_ind)
+    )
     h10_norm_correction_form = dfx.fem.form(h10_norm_correction)
     h10_norm_correction_vec = assemble_vector(h10_norm_correction_form)
 
@@ -150,3 +167,235 @@ def compute_boundary_local_estimators(
     h10_norm_dg0 = dfx.fem.Function(dg0_coarse_space)
     h10_norm_dg0.x.array[:] = h10_norm_vec_coarse
     return h10_norm_dg0
+
+
+def phifem_direct_solve(spaces, fh, phih, measures, coefs):
+    fe_space, solution_space = (spaces["primal"], spaces["solution"])
+    dx, dS, ds = (measures["dx"], measures["dS"], measures["ds"])
+    stab_coef = coefs["stabilization"]
+
+    mesh = fe_space.mesh
+    h_T = ufl.CellDiameter(mesh)
+    n = ufl.FacetNormal(mesh)
+
+    wh = ufl.TrialFunction(fe_space)
+    uh = phih * wh
+    zh = ufl.TestFunction(fe_space)
+    vh = phih * zh
+
+    stiffness = ufl.inner(ufl.grad(uh), ufl.grad(vh))
+
+    boundary = ufl.inner(ufl.inner(ufl.grad(uh), n), vh)
+
+    stabilization_facets = (
+        stab_coef
+        * ufl.avg(h_T)
+        * ufl.inner(ufl.jump(ufl.grad(uh), n), ufl.jump(ufl.grad(vh), n))
+    )
+    stabilization_cells = stab_coef * h_T**2 * ufl.inner(delta(uh), delta(vh))
+
+    a = (
+        stiffness * dx((1, 2))
+        - boundary * ds
+        + stabilization_cells * dx(2)
+        + stabilization_facets * dS(2)
+    )
+
+    # Linear form
+    rhs = ufl.inner(fh, vh)
+    stabilization_rhs = stab_coef * h_T**2 * ufl.inner(fh, delta(vh))
+
+    L = rhs * dx((1, 2)) - stabilization_rhs * dx(2)
+
+    # Assemble linear system
+    bilinear_form = dfx.fem.form(a)
+    A = assemble_matrix(bilinear_form)
+    A.assemble()
+    linear_form = dfx.fem.form(L)
+    b = assemble_vector(linear_form)
+    b.assemble()
+
+    # PETSc solver
+    solver = PETSc.KSP().create(mesh.comm)
+    solver.setType("preonly")
+    solver.setOperators(A)
+    pc = solver.getPC()
+    pc.setType("lu")
+
+    # Solve linear system
+    solution_w = dfx.fem.Function(fe_space)
+    solver.solve(b, solution_w.x.petsc_vec)
+    solver.destroy()
+
+    # Compute the product of phih with solution_w to get solution_u
+    solution_u = dfx.fem.Function(solution_space)
+    solution_w_u = dfx.fem.Function(solution_space)
+    levelset_u = dfx.fem.Function(solution_space)
+    solution_w_u.interpolate(solution_w)
+    levelset_u.interpolate(phih)
+    solution_u.x.array[:] = solution_w_u.x.array[:] * levelset_u.x.array[:]
+
+    return solution_u, solution_w
+
+
+def phifem_dual_solve(mixed_space, fh, phih, measures, coefs):
+    dx, dS, ds = (measures["dx"], measures["dS"], measures["ds"])
+    pen_coef, stab_coef = (coefs["penalization"], coefs["stabilization"])
+
+    mesh = mixed_space.mesh
+    h_T = ufl.CellDiameter(mesh)
+    n = ufl.FacetNormal(mesh)
+
+    uh, ph = ufl.TrialFunctions(mixed_space)
+    vh, qh = ufl.TestFunctions(mixed_space)
+
+    stiffness = ufl.inner(ufl.grad(uh), ufl.grad(vh))
+
+    boundary = ufl.inner(ufl.inner(ufl.grad(uh), n), vh)
+
+    stabilization_facets = (
+        stab_coef
+        * ufl.avg(h_T)
+        * ufl.inner(ufl.jump(ufl.grad(uh), n), ufl.jump(ufl.grad(vh), n))
+    )
+    stabilization_cells = stab_coef * h_T**2 * ufl.inner(delta(uh), delta(vh))
+
+    penalization = (
+        pen_coef
+        * h_T ** (-2)
+        * ufl.inner(uh - h_T ** (-1) * ph * phih, vh - h_T ** (-1) * qh * phih)
+    )
+
+    a = (
+        stiffness * dx((1, 2))
+        - boundary * ds
+        + penalization * dx(2)
+        + stabilization_cells * dx(2)
+        + stabilization_facets * dS(2)
+    )
+
+    # Linear form
+    rhs = ufl.inner(fh, vh)
+    stabilization_rhs = stab_coef * h_T**2 * ufl.inner(fh, delta(vh))
+
+    L = rhs * dx((1, 2)) - stabilization_rhs * dx(2)
+
+    # Assemble linear system
+    bilinear_form = dfx.fem.form(a)
+    A = assemble_matrix(bilinear_form)
+    A.assemble()
+    linear_form = dfx.fem.form(L)
+    b = assemble_vector(linear_form)
+    b.assemble()
+
+    # PETSc solver
+    solver = PETSc.KSP().create(mesh.comm)
+    solver.setType("preonly")
+    solver.setOperators(A)
+    pc = solver.getPC()
+    pc.setType("lu")
+
+    # Let mumps handle the null space in box mode
+    pc.setFactorSolverType("mumps")
+    pc.setFactorSetUpSolverType()
+    pc.getFactorMatrix().setMumpsIcntl(icntl=24, ival=1)
+    pc.getFactorMatrix().setMumpsIcntl(icntl=25, ival=0)
+
+    # Solve linear system
+    solution_w = dfx.fem.Function(mixed_space)
+    solver.solve(b, solution_w.x.petsc_vec)
+    solver.destroy()
+
+    solution_u, solution_p = solution_w.split()
+    solution_u = solution_u.collapse()
+    solution_p = solution_p.collapse()
+
+    return solution_u, solution_p
+
+
+def residual_estimation(
+    dg0_space,
+    solution_u,
+    fh,
+    phih,
+    measures,
+    coefs,
+    solution_p=None,
+):
+    dual = solution_p is not None
+    dx, dS = (measures["dx"], measures["dS"])
+
+    mesh = solution_u.function_space.mesh
+    h_T = ufl.CellDiameter(mesh)
+    n = ufl.FacetNormal(mesh)
+
+    k = solution_u.function_space.element.basix_element.degree
+    quadrature_degree_cells = max(0, k - 2)
+    quadrature_degree_facets = max(0, k - 1)
+
+    dx_est = dx.reconstruct(
+        metadata={"quadrature_degree": quadrature_degree_cells},
+    )
+    dS_est = dS.reconstruct(
+        metadata={"quadrature_degree": quadrature_degree_facets},
+    )
+
+    rh = fh + delta(solution_u)
+    Jh = ufl.jump(ufl.grad(solution_u), -n)
+
+    w0 = ufl.TestFunction(dg0_space)
+
+    eta_T = h_T**2 * ufl.inner(ufl.inner(rh, rh), w0) * dx_est((1, 2))
+    eta_E = ufl.avg(h_T) * ufl.inner(ufl.inner(Jh, Jh), ufl.avg(w0)) * dS_est((1, 2))
+
+    eta_dict = {"eta_T": eta_T, "eta_E": eta_E}
+
+    if dual:
+        pen_coef = coefs["penalization"]
+        eta_p = (
+            pen_coef
+            * (
+                h_T ** (-2)
+                * ufl.inner(
+                    solution_u - h_T ** (-1) * solution_p * phih,
+                    solution_u - h_T ** (-1) * solution_p * phih,
+                )
+                * w0
+            )
+            * dx(2)
+        )
+        eta_dict["eta_p"] = eta_p
+
+    for name, e in eta_dict.items():
+        e_form = dfx.fem.form(e)
+        e_vec = assemble_vector(e_form)
+        e_h = dfx.fem.Function(dg0_space)
+        e_h.x.array[:] = e_vec.array[:]
+        eta_dict[name] = e_h
+    return eta_dict
+
+
+def marking(est_h, dorfler_param):
+    mesh = est_h.function_space.mesh
+    cdim = mesh.topology.dim
+
+    est_global = est_h.x.array.sum()
+    cutoff = dorfler_param * est_global
+
+    sorted_cells = np.argsort(est_h.x.array)[::-1]
+    rolling_sum = 0.0
+    breakpt = 0
+    for j, e in enumerate(est_h.x.array[sorted_cells]):
+        rolling_sum += e
+        if rolling_sum > cutoff:
+            breakpt = j
+            break
+
+    refine_cells = sorted_cells[0 : breakpt + 1]
+    indices = np.array(np.sort(refine_cells), dtype=np.int32)
+    fdim = cdim - 1
+    c2f_connect = mesh.topology.connectivity(cdim, fdim)
+    num_facets_per_cell = len(c2f_connect.links(0))
+    c2f_map = np.reshape(c2f_connect.array, (-1, num_facets_per_cell))
+    facets_indices = np.unique(np.sort(c2f_map[indices]))
+    return facets_indices
