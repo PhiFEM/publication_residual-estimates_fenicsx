@@ -4,7 +4,6 @@ import ufl
 from basix.ufl import element
 from dolfinx.cpp.refinement import RefinementOption
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector
-from dolfinx.io import XDMFFile
 from petsc4py import PETSc
 
 
@@ -37,7 +36,7 @@ def delta(u):
     return ufl.div(ufl.grad(u))
 
 
-def save_function(fct: dfx.fem.Function, file_path: str):
+def save_function(fct: dfx.fem.Function, file_path: str, mode=dfx.io.XDMFFile):
     """Save a dolfinx function using XDMFFile and interpolate it to a linear space if needed.
 
     Args:
@@ -59,18 +58,18 @@ def save_function(fct: dfx.fem.Function, file_path: str):
         cg1_space = dfx.fem.functionspace(mesh, cg1_element)
         cg1_fct = dfx.fem.Function(cg1_space)
         cg1_fct.interpolate(fct)
-        with XDMFFile(mesh.comm, file_path, "w") as of:
+        with mode(mesh.comm, file_path, "w") as of:
             of.write_mesh(mesh)
             of.write_function(cg1_fct)
     else:
-        with XDMFFile(mesh.comm, file_path, "w") as of:
+        with mode(mesh.comm, file_path, "w") as of:
             of.write_mesh(mesh)
             of.write_function(fct)
 
 
 def compute_boundary_local_estimators(
     coarse_mesh,
-    solution_w,
+    solution_p,
     levelset,
     phih,
     cells_tags,
@@ -100,7 +99,7 @@ def compute_boundary_local_estimators(
         facets_to_refine,
         option=RefinementOption.parent_cell,
     )
-    # WARNING: child-parent cells map is not correctly computed from refine! To be able to use it you have to use the following trick, inspired by https://fenicsproject.discourse.group/t/mesh-refinement-using-dolfinx-mesh-refine-plaza/15168/4
+    # WARNING: child-parent cells map "parent_cells" returned by refine is not correct! The correct mapping is obtained via the following trick, inspired by https://fenicsproject.discourse.group/t/mesh-refinement-using-dolfinx-mesh-refine-plaza/15168/4
     fine_cells_tags = dfx.mesh.transfer_meshtag(cells_tags, fine_mesh, parent_cells)
     num_cells_dummy = dummy_mesh.topology.index_map(cdim).size_global
     parent_ct_indices = np.arange(num_cells_dummy).astype(np.int32)
@@ -112,7 +111,8 @@ def compute_boundary_local_estimators(
         parent_ct_indices[sorted_indices],
         parent_ct_markers[sorted_indices],
     )
-    parent_cells = dfx.mesh.transfer_meshtag(parent_ct, fine_mesh, parent_cells).values
+    parent_cells_tags = dfx.mesh.transfer_meshtag(parent_ct, fine_mesh, parent_cells)
+    parent_cells = parent_cells_tags.values
 
     phih_space = phih.function_space
     fine_element = phih_space.ufl_element()
@@ -130,16 +130,12 @@ def compute_boundary_local_estimators(
     phi_fine.interpolate(levelset)
 
     nmm_solution_w_space2fine_space = dfx.fem.create_interpolation_data(
-        fine_space, solution_w.function_space, fine_cells, padding=padding
+        fine_space, solution_p.function_space, fine_cells, padding=padding
     )
-    solution_w_fine = dfx.fem.Function(fine_space)
-    solution_w_fine.interpolate_nonmatching(
-        solution_w, fine_cells, nmm_solution_w_space2fine_space
+    solution_p_fine = dfx.fem.Function(fine_space)
+    solution_p_fine.interpolate_nonmatching(
+        solution_p, fine_cells, nmm_solution_w_space2fine_space
     )
-    correction_function_fine = dfx.fem.Function(fine_space)
-    correction_function_fine.x.array[:] = (
-        phih_fine.x.array[:] - phi_fine.x.array[:]
-    ) * solution_w_fine.x.array[:]
 
     cell_name = fine_mesh.topology.cell_name()
     dg0_element = element("DG", cell_name, 0)
@@ -147,11 +143,28 @@ def compute_boundary_local_estimators(
 
     dx = ufl.Measure("dx", domain=fine_mesh, subdomain_data=fine_cells_tags)
     v0 = ufl.TestFunction(dg0_fine_space)
+
+    dg0_coarse_space = dfx.fem.functionspace(coarse_mesh, dg0_element)
+    h_T_coarse = cell_diameter(dg0_coarse_space)
+    h_T_fine = dfx.fem.Function(dg0_fine_space)
+    nmm_dg0_coarse_space2dg0_fine_space = dfx.fem.create_interpolation_data(
+        dg0_fine_space, dg0_coarse_space, fine_cells, padding=padding
+    )
+    h_T_fine.interpolate_nonmatching(
+        h_T_coarse, fine_cells, nmm_dg0_coarse_space2dg0_fine_space
+    )
+    correction_function_fine = dfx.fem.Function(fine_space)
+    correction_function_fine.x.array[:] = (
+        phih_fine.x.array[:] - phi_fine.x.array[:]
+    ) * solution_p_fine.x.array[:]
+    correction_function_fine = correction_function_fine * h_T_fine ** (-1)
     grad_correction = ufl.grad(correction_function_fine)
     if dual:
-        measure_ind = (1, 2)
+        measure_ind = 2
     else:
         measure_ind = (1, 2)
+
+    # eta_{1,z}
     h10_norm_correction = (
         ufl.inner(grad_correction, grad_correction) * v0 * dx(measure_ind)
     )
@@ -166,7 +179,41 @@ def compute_boundary_local_estimators(
     dg0_coarse_space = dfx.fem.functionspace(coarse_mesh, dg0_element)
     h10_norm_dg0 = dfx.fem.Function(dg0_coarse_space)
     h10_norm_dg0.x.array[:] = h10_norm_vec_coarse
-    return h10_norm_dg0
+
+    # eta_{0,z}
+    l2_norm_correction = (
+        h_T_fine ** (-2)
+        * ufl.inner(correction_function_fine, correction_function_fine)
+        * v0
+        * dx(measure_ind)
+    )
+    l2_norm_correction_form = dfx.fem.form(l2_norm_correction)
+    l2_norm_correction_vec = assemble_vector(l2_norm_correction_form)
+
+    l2_norm_dg0_fine = dfx.fem.Function(dg0_fine_space)
+    l2_norm_dg0_fine.x.array[:] = l2_norm_correction_vec.array[:]
+    l2_norm_vec_coarse = np.bincount(
+        parent_cells, weights=l2_norm_correction_vec.array[:]
+    )
+    dg0_coarse_space = dfx.fem.functionspace(coarse_mesh, dg0_element)
+
+    dg0_coarse_space = dfx.fem.functionspace(coarse_mesh, dg0_element)
+    l2_norm_dg0 = dfx.fem.Function(dg0_coarse_space)
+    l2_norm_dg0.x.array[:] = l2_norm_vec_coarse
+
+    fine_submesh, emap = dfx.mesh.create_submesh(
+        fine_mesh, cdim, fine_cells_tags.find(2)
+    )[:2]
+    fine_submesh_indices = fine_cells_tags.indices[emap]
+    fine_submesh_markers = fine_cells_tags.values[emap]
+    sorted_indices = np.argsort(fine_submesh_indices)
+    fine_submesh_tags = dfx.mesh.meshtags(
+        fine_submesh,
+        cdim,
+        fine_submesh_indices[sorted_indices],
+        fine_submesh_markers[sorted_indices],
+    )
+    return h10_norm_dg0, l2_norm_dg0, fine_submesh_tags, fine_submesh
 
 
 def phifem_direct_solve(spaces, fh, phih, measures, coefs):
@@ -238,7 +285,7 @@ def phifem_direct_solve(spaces, fh, phih, measures, coefs):
     return solution_u, solution_w
 
 
-def phifem_dual_solve(mixed_space, fh, phih, measures, coefs):
+def phifem_dual_solve(mixed_space, fh, gh, phih, measures, coefs):
     dx, dS, ds = (measures["dx"], measures["dS"], measures["ds"])
     pen_coef, stab_coef = (coefs["penalization"], coefs["stabilization"])
 
@@ -276,9 +323,12 @@ def phifem_dual_solve(mixed_space, fh, phih, measures, coefs):
 
     # Linear form
     rhs = ufl.inner(fh, vh)
+    penalization_rhs = (
+        pen_coef * h_T ** (-2) * ufl.inner(gh, vh - h_T ** (-1) * qh * phih)
+    )
     stabilization_rhs = stab_coef * h_T**2 * ufl.inner(fh, delta(vh))
 
-    L = rhs * dx((1, 2)) - stabilization_rhs * dx(2)
+    L = rhs * dx((1, 2)) + penalization_rhs * dx(2) - stabilization_rhs * dx(2)
 
     # Assemble linear system
     bilinear_form = dfx.fem.form(a)
@@ -313,20 +363,81 @@ def phifem_dual_solve(mixed_space, fh, phih, measures, coefs):
     return solution_u, solution_p
 
 
+def fem_solve(fe_space, fh, gh):
+    mesh = fe_space.mesh
+    tdim = mesh.topology.dim
+    dx = ufl.Measure("dx", domain=mesh)
+
+    bcs = []
+    boundary_facets = dfx.mesh.locate_entities_boundary(
+        mesh, tdim - 1, lambda x: np.ones_like(x[0]).astype(bool)
+    )
+    dofs_D = dfx.fem.locate_dofs_topological(fe_space, tdim - 1, boundary_facets)
+    bc = dfx.fem.dirichletbc(gh, dofs_D)
+    bcs = [bc]
+
+    u = ufl.TrialFunction(fe_space)
+    v = ufl.TestFunction(fe_space)
+
+    a = ufl.inner(ufl.grad(u), ufl.grad(v)) * dx
+    L = ufl.inner(fh, v) * dx
+
+    bilinear_form = dfx.fem.form(a)
+    A = assemble_matrix(bilinear_form, bcs=bcs)
+    A.assemble()
+    linear_form = dfx.fem.form(L)
+    b = assemble_vector(linear_form)
+    if len(bcs) > 0:
+        dfx.fem.apply_lifting(b, [bilinear_form], [bcs])
+        dfx.fem.set_bc(b, bcs)
+    b.assemble()
+
+    # PETSc solver
+    solver = PETSc.KSP().create(mesh.comm)
+    solver.setType("preonly")
+    solver.setOperators(A)
+    pc = solver.getPC()
+    pc.setType("cholesky")
+
+    solution = dfx.fem.Function(fe_space)
+    solver.solve(b, solution.x.petsc_vec)
+    solver.destroy()
+    return solution
+
+
+def cell_diameter(dg0_space):
+    v0 = ufl.TestFunction(dg0_space)
+
+    vol = v0 * ufl.dx
+    vol_form = dfx.fem.form(vol)
+    vol_vec = assemble_vector(vol_form)
+    size = np.sqrt(vol_vec.array)
+
+    h_T = dfx.fem.Function(dg0_space)
+    h_T.x.array[:] = size
+    return h_T
+
+
 def residual_estimation(
     dg0_space,
     solution_u,
     fh,
-    phih,
+    gh,
     measures,
-    coefs,
+    coefs=None,
+    phih=None,
     solution_p=None,
+    curved=False,
+    dirichlet_estimator=False,
 ):
     dual = solution_p is not None
     dx, dS = (measures["dx"], measures["dS"])
 
     mesh = solution_u.function_space.mesh
-    h_T = ufl.CellDiameter(mesh)
+    if curved:
+        h_T = cell_diameter(dg0_space)
+    else:
+        h_T = ufl.CellDiameter(mesh)
     n = ufl.FacetNormal(mesh)
 
     k = solution_u.function_space.element.basix_element.degree
@@ -345,20 +456,24 @@ def residual_estimation(
 
     w0 = ufl.TestFunction(dg0_space)
 
-    eta_T = h_T**2 * ufl.inner(ufl.inner(rh, rh), w0) * dx_est((1, 2))
-    eta_E = ufl.avg(h_T) * ufl.inner(ufl.inner(Jh, Jh), ufl.avg(w0)) * dS_est((1, 2))
+    eta_T = h_T**2 * ufl.inner(ufl.inner(rh, rh), w0) * dx_est
+    eta_E = ufl.avg(h_T) * ufl.inner(ufl.inner(Jh, Jh), ufl.avg(w0)) * dS_est
 
     eta_dict = {"eta_T": eta_T, "eta_E": eta_E}
 
-    if dual:
+    if dual and dirichlet_estimator:
+        if phih is None:
+            raise ValueError(
+                "You must pass a discrete levelset in order to compute eta_p."
+            )
         pen_coef = coefs["penalization"]
         eta_p = (
             pen_coef
             * (
                 h_T ** (-2)
                 * ufl.inner(
-                    solution_u - h_T ** (-1) * solution_p * phih,
-                    solution_u - h_T ** (-1) * solution_p * phih,
+                    solution_u - h_T ** (-1) * solution_p * phih - gh,
+                    solution_u - h_T ** (-1) * solution_p * phih - gh,
                 )
                 * w0
             )
@@ -392,10 +507,23 @@ def marking(est_h, dorfler_param):
             break
 
     refine_cells = sorted_cells[0 : breakpt + 1]
-    indices = np.array(np.sort(refine_cells), dtype=np.int32)
+    cells_indices = np.array(np.sort(refine_cells), dtype=np.int32)
     fdim = cdim - 1
     c2f_connect = mesh.topology.connectivity(cdim, fdim)
     num_facets_per_cell = len(c2f_connect.links(0))
     c2f_map = np.reshape(c2f_connect.array, (-1, num_facets_per_cell))
-    facets_indices = np.unique(np.sort(c2f_map[indices]))
-    return facets_indices
+    facets_indices = np.unique(np.sort(c2f_map[cells_indices]))
+    return facets_indices, cells_indices
+
+
+def compute_xi_ref(solution_u_ref, g_ref):
+    ref_space = solution_u_ref.function_space
+    xi_source_term = dfx.fem.Function(ref_space)
+    xi_dirichlet_data = dfx.fem.Function(ref_space)
+    xi_dirichlet_data.x.array[:] = solution_u_ref.x.array[:] - g_ref.x.array[:]
+    xi_ref = fem_solve(solution_u_ref.function_space, xi_source_term, xi_dirichlet_data)
+    return xi_ref
+
+
+# def compute_xi_tilde_ref(solution_u, reference_solution):
+#

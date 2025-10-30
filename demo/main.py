@@ -11,17 +11,17 @@ import polars as pl
 import ufl
 import yaml
 from basix.ufl import element, mixed_element
-from dolfinx.fem.petsc import assemble_vector
 from meshtagsplot import plot_mesh_tags
 from mpi4py import MPI
 from phifem.mesh_scripts import compute_tags_measures
+from plots import plot_mesh, plot_scalar, plot_tags
 from utils import (
+    cell_diameter,
     compute_boundary_local_estimators,
     marking,
     phifem_direct_solve,
     phifem_dual_solve,
     residual_estimation,
-    save_function,
 )
 
 parent_dir = os.path.dirname(__file__)
@@ -32,29 +32,49 @@ parser = argparse.ArgumentParser(
 )
 
 parser.add_argument("parameters", type=str, help="Choose the demo/parameters to run.")
-
-parser.add_argument("--tags", default=False, action="store_true")
+parser.add_argument("--plot", action="store_true", help="Plot cells and facets tags.")
 
 args = parser.parse_args()
 demo, parameters = args.parameters.split(sep="/")
-plot_tags = args.tags
+plot = args.plot
 
 
 source_dir = os.path.join(parent_dir, demo)
-output_dir = os.path.join(source_dir, "output_phifem_" + parameters)
+output_dir = os.path.join(source_dir, "output_" + parameters)
+
 checkpoint_dir = os.path.join(output_dir, "checkpoints")
 
 if os.path.isdir(checkpoint_dir):
     shutil.rmtree(checkpoint_dir)
 
-for dir_path in [output_dir, checkpoint_dir]:
+data_dir = os.path.join(output_dir, "data")
+tags_dir = os.path.join(output_dir, "tags")
+solutions_dir = os.path.join(output_dir, "solutions")
+levelsets_dir = os.path.join(output_dir, "levelsets")
+etas_dir = os.path.join(output_dir, "etas")
+estimators_dir = os.path.join(output_dir, "estimators")
+reference_errors_dir = os.path.join(output_dir, "reference_errors")
+meshes_dir = os.path.join(output_dir, "meshes")
+dirs = [
+    output_dir,
+    tags_dir,
+    data_dir,
+    checkpoint_dir,
+    solutions_dir,
+    levelsets_dir,
+    etas_dir,
+    estimators_dir,
+    reference_errors_dir,
+    meshes_dir,
+]
+for dir_path in dirs:
     if not os.path.isdir(dir_path):
         print(f"{dir_path} directory not found, we create it.")
         os.mkdir(dir_path)
 
 sys.path.append(source_dir)
 
-from data import generate_levelset, source_term
+from data import generate_dirichlet_data, generate_levelset, generate_source_term
 
 try:
     from data import generate_detection_levelset
@@ -63,12 +83,6 @@ except ImportError:
         "Didn't find detection_levelset for the specified demo, using levelset instead."
     )
     generate_detection_levelset = generate_levelset
-
-exact_sol_available = True
-try:
-    from data import exact_solution
-except ImportError:
-    exact_sol_available = False
 
 with open(os.path.join(source_dir, parameters + ".yaml"), "rb") as f:
     parameters = yaml.safe_load(f)
@@ -89,6 +103,7 @@ refinement = parameters["refinement"]
 boundary_correction = parameters["boundary_correction"]
 auxiliary_degree = parameters["auxiliary_degree"]
 discretize_levelset = parameters["discretize_levelset"]
+dirichlet_estimator = parameters["dirichlet_estimator"]
 
 dual = auxiliary_degree > -1
 
@@ -104,11 +119,12 @@ mesh = dfx.mesh.create_rectangle(
 results = {
     "iteration": [],
     "dof": [],
-    "H10_estimator": [],
+    "estimator": [],
     "eta_T": [],
     "eta_E": [],
     "eta_p": [],
-    "eta_eps": [],
+    "eta_1_z": [],
+    "eta_0_z": [],
 }
 
 
@@ -131,37 +147,61 @@ for i in range(iterations_num):
             mesh, detection_levelset, detection_degree, box_mode=box_mode
         )
         ds = ufl.Measure("ds", domain=mesh)
-
-    if plot_tags:
+    plot_mesh(
+        mesh,
+        os.path.join(meshes_dir, f"mesh_{str(i).zfill(2)}"),
+        wireframe=True,
+        linewidth=1.5,
+    )
+    if plot:
+        leg_dict = {1: "inside", 2: "cut", 3: "outside"}
+        plot_levelset = generate_detection_levelset(np)
         fig = plt.figure()
         ax = fig.subplots()
-        leg_dict = {1: "inside", 2: "cut"}
+        levelset_kwargs = {"colors": "k", "linewidths": 2.0, "linestyles": "--"}
         plot_mesh_tags(
             mesh,
             cells_tags,
             ax,
-            expression_levelset=generate_detection_levelset(np),
+            expression_levelset=plot_levelset,
             leg_dict=leg_dict,
+            levelset_kwargs=levelset_kwargs,
+            display_scalarbar=False,
         )
         plt.savefig(
-            os.path.join(output_dir, f"cells_tags_{str(i).zfill(2)}.png"),
-            dpi=500,
+            os.path.join(tags_dir, f"cells_tags_{str(i).zfill(2)}.png"),
             bbox_inches="tight",
+            dpi=500,
         )
+        plot_tags(
+            mesh,
+            cells_tags,
+            os.path.join(tags_dir, f"cells_tags_{str(i).zfill(2)}"),
+            annotations=leg_dict,
+            line_width=5.0,
+        )
+        leg_dict = {1: "inside", 2: "cut", 3: "inside boundary", 4: "outside boundary"}
         fig = plt.figure()
         ax = fig.subplots()
-        leg_dict = {1: "inside", 2: "cut", 3: "inside boundary", 4: "outside boundary"}
         plot_mesh_tags(
             mesh,
             facets_tags,
             ax,
-            expression_levelset=generate_detection_levelset(np),
+            expression_levelset=plot_levelset,
             leg_dict=leg_dict,
+            levelset_kwargs=levelset_kwargs,
         )
         plt.savefig(
-            os.path.join(output_dir, f"facets_tags_{str(i).zfill(2)}.png"),
-            dpi=500,
+            os.path.join(tags_dir, f"facets_tags_{str(i).zfill(2)}.png"),
             bbox_inches="tight",
+            dpi=500,
+        )
+        plot_tags(
+            mesh,
+            facets_tags,
+            os.path.join(tags_dir, f"facets_tags_{str(i).zfill(2)}"),
+            line_width=8.0,
+            annotations=leg_dict,
         )
     results["iteration"].append(i)
 
@@ -175,9 +215,10 @@ for i in range(iterations_num):
 
     fe_element = element("Lagrange", cell_name, fe_degree)
     if dual:
-        aux_element = element("Lagrange", cell_name, auxiliary_degree)
+        aux_element = element("DG", cell_name, auxiliary_degree)
         mxd_element = mixed_element([fe_element, aux_element])
         fe_space = dfx.fem.functionspace(mesh, mxd_element)
+        aux_space = dfx.fem.functionspace(mesh, aux_element)
     else:
         fe_space = dfx.fem.functionspace(mesh, fe_element)
         solution_element = element("Lagrange", cell_name, solution_degree)
@@ -195,48 +236,112 @@ for i in range(iterations_num):
 
     results["dof"].append(len(active_dofs))
 
+    checkpoint_file = os.path.join(checkpoint_dir, f"checkpoint_{str(i).zfill(2)}.bp")
+    adios4dolfinx.write_mesh(checkpoint_file, mesh)
+
     levelset = generate_levelset(np)
     phih = dfx.fem.Function(levelset_space)
+    adios4dolfinx.write_function(checkpoint_file, phih, name="levelset")
 
     if dual:
         phih.interpolate(levelset, cells_tags.find(2))
+        phih_plot = dfx.fem.Function(levelset_space)
+        phih_plot.interpolate(levelset)
     else:
         phih.interpolate(levelset)
+        phih_plot = phih
 
-    save_function(phih, os.path.join(output_dir, f"levelset_{str(i).zfill(2)}.xdmf"))
-
-    if exact_sol_available:
-        x_ufl = ufl.SpatialCoordinate(mesh)
-        fh = source_term(x_ufl)
-    else:
-        u_space = dfx.fem.functionspace(mesh, fe_element)
-        fh = dfx.fem.Function(u_space)
-        fh.interpolate(source_term)
-        save_function(
-            fh, os.path.join(output_dir, f"source_term_{str(i).zfill(2)}.xdmf")
-        )
-
-    if dual:
-        solution_u, solution_p = phifem_dual_solve(fe_space, fh, phih, measures, coefs)
-    else:
-        spaces = {"primal": fe_space, "solution": solution_space}
-        solution_u, solution_w = phifem_direct_solve(spaces, fh, phih, measures, coefs)
-
-    save_function(
-        solution_u, os.path.join(output_dir, f"solution_u_{str(i).zfill(2)}.xdmf")
+    plot_scalar(phih_plot, os.path.join(levelsets_dir, f"levelset_{str(i).zfill(2)}"))
+    plot_scalar(
+        phih_plot,
+        os.path.join(levelsets_dir, f"levelset_{str(i).zfill(2)}"),
+        warp_by_scalar=True,
     )
 
-    checkpoint_file = os.path.join(checkpoint_dir, f"checkpoint_{str(i).zfill(2)}.bp")
-    adios4dolfinx.write_mesh(checkpoint_file, mesh)
-    adios4dolfinx.write_function(checkpoint_file, solution_u, name="solution")
+    u_space = dfx.fem.functionspace(mesh, fe_element)
+    source_term = generate_source_term(ufl)
+    dirichlet_data = generate_dirichlet_data(ufl)
+    x = ufl.SpatialCoordinate(mesh)
+    fh = source_term(x)
+    fh = dfx.fem.Function(u_space)
+    fh.interpolate(source_term)
+    gh = dfx.fem.Function(u_space)
+    gh.interpolate(dirichlet_data)
+    plot_scalar(fh, os.path.join(data_dir, f"source_term_{str(i).zfill(2)}"))
+    plot_scalar(gh, os.path.join(data_dir, f"dirichlet_data_{str(i).zfill(2)}"))
+    plot_scalar(
+        fh,
+        os.path.join(data_dir, f"source_term_{str(i).zfill(2)}"),
+        warp_by_scalar=True,
+    )
+    plot_scalar(
+        gh,
+        os.path.join(data_dir, f"dirichlet_data_{str(i).zfill(2)}"),
+        warp_by_scalar=True,
+    )
+
+    if dual:
+        solution_u, solution_p = phifem_dual_solve(
+            fe_space, fh, gh, phih, measures, coefs
+        )
+    else:
+        spaces = {"primal": fe_space, "solution": solution_space}
+        solution_u, solution_w = phifem_direct_solve(
+            spaces, fh, gh, phih, measures, coefs
+        )
+
+    plot_scalar(
+        solution_u, os.path.join(solutions_dir, f"solution_u_{str(i).zfill(2)}")
+    )
+    plot_scalar(
+        solution_u,
+        os.path.join(solutions_dir, f"solution_u_{str(i).zfill(2)}"),
+        warp_by_scalar=True,
+    )
+
+    plot_scalar(
+        solution_p, os.path.join(solutions_dir, f"solution_p_{str(i).zfill(2)}")
+    )
+    plot_scalar(
+        solution_p,
+        os.path.join(solutions_dir, f"solution_p_{str(i).zfill(2)}"),
+        warp_by_scalar=True,
+    )
+
+    adios4dolfinx.write_meshtags(
+        checkpoint_file, mesh, cells_tags, meshtag_name="cells_tags"
+    )
+    adios4dolfinx.write_meshtags(
+        checkpoint_file, mesh, facets_tags, meshtag_name="facets_tags"
+    )
+    adios4dolfinx.write_function(checkpoint_file, solution_u, name="solution_u")
+    adios4dolfinx.write_function(checkpoint_file, solution_p, name="solution_p")
 
     # Residual error estimation
     if dual:
         eta_dict = residual_estimation(
-            dg0_space, solution_u, fh, phih, measures, coefs, solution_p=solution_p
+            dg0_space,
+            solution_u,
+            fh,
+            gh,
+            {"dx": dx((1, 2)), "dS": dS((1, 2))},
+            coefs=coefs,
+            phih=phih,
+            solution_p=solution_p,
+            dirichlet_estimator=dirichlet_estimator,
         )
+        if not dirichlet_estimator:
+            results["eta_p"].append(np.nan)
     else:
-        eta_dict = residual_estimation(dg0_space, solution_u, fh, phih, measures, coefs)
+        eta_dict = residual_estimation(
+            dg0_space,
+            solution_u,
+            fh,
+            gh,
+            {"dx": dx((1, 2)), "dS": dS((1, 2))},
+            coefs=coefs,
+            phih=phih,
+        )
         results["eta_p"].append(np.nan)
 
     if boundary_correction:
@@ -245,26 +350,51 @@ for i in range(iterations_num):
         else:
             solution = solution_w
 
-        eta_dict["eta_eps"] = compute_boundary_local_estimators(
-            mesh, solution, levelset, phih, cells_tags, facets_tags, dual=dual
+        eta_dict["eta_1_z"], eta_dict["eta_0_z"], parent_cells_tags, fine_mesh = (
+            compute_boundary_local_estimators(
+                mesh, solution, levelset, phih, cells_tags, facets_tags, dual=dual
+            )
         )
+        if plot:
+            leg_dict = {1: "inside", 2: "cut", 3: "outside"}
+            levelset_kwargs = {"colors": "k", "linewidths": 2.0, "linestyles": "--"}
+            fig = plt.figure()
+            ax = fig.subplots()
+            plot_mesh_tags(
+                fine_mesh,
+                parent_cells_tags,
+                ax,
+                expression_levelset=plot_levelset,
+                leg_dict=leg_dict,
+                levelset_kwargs=levelset_kwargs,
+                display_scalarbar=False,
+            )
+            plt.savefig(
+                os.path.join(tags_dir, f"parent_cells_tags_{str(i).zfill(2)}.png"),
+                bbox_inches="tight",
+                dpi=500,
+            )
+            plot_tags(
+                fine_mesh,
+                parent_cells_tags,
+                os.path.join(tags_dir, f"parent_cells_tags_{str(i).zfill(2)}"),
+                line_width=5.0,
+                annotations=leg_dict,
+            )
     else:
-        results["eta_eps"].append(np.nan)
+        results["eta_1_z"].append(np.nan)
+        results["eta_0_z"].append(np.nan)
 
     est_h = dfx.fem.Function(dg0_space)
     for name, eta in eta_dict.items():
-        save_function(
-            eta, os.path.join(output_dir, name + "_" + str(i).zfill(2) + ".xdmf")
-        )
+        plot_scalar(eta, os.path.join(etas_dir, name + "_" + str(i).zfill(2)))
 
-        results[name].append(np.sqrt(eta.x.array.sum()))
         est_h.x.array[:] += eta.x.array[:]
+        results[name].append(np.sqrt(eta.x.array.sum()))
 
-    results["H10_estimator"].append(np.sqrt(est_h.x.array.sum()))
+    results["estimator"].append(np.sqrt(est_h.x.array.sum()))
 
-    save_function(
-        est_h, os.path.join(output_dir, f"H10_estimator_{str(i).zfill(2)}.xdmf")
-    )
+    plot_scalar(est_h, os.path.join(estimators_dir, f"estimator_{str(i).zfill(2)}"))
 
     df = pl.DataFrame(results)
     print(df)
@@ -273,132 +403,7 @@ for i in range(iterations_num):
     if i < iterations_num:
         # Marking and refinement
         if refinement == "adap":
-            facets_indices = marking(est_h, dorfler_param)
+            facets_indices = marking(est_h, dorfler_param)[0]
             mesh = dfx.mesh.refine(mesh, facets_indices)[0]
         elif refinement == "unif":
             mesh = dfx.mesh.refine(mesh)[0]
-
-if not exact_sol_available:
-    fdim = mesh.topology.dim - 1
-    for k in range(2):
-        mesh.topology.create_entities(fdim)
-        mesh = dfx.mesh.refine(mesh)[0]
-        x_ufl = ufl.SpatialCoordinate(mesh)
-        detection_levelset = generate_detection_levelset(ufl)(x_ufl)
-        if box_mode:
-            cells_tags, facets_tags, _, ds, _, _ = compute_tags_measures(
-                mesh, detection_levelset, detection_degree, box_mode=box_mode
-            )
-        else:
-            cells_tags, facets_tags, mesh, _, _, _ = compute_tags_measures(
-                mesh, detection_levelset, detection_degree, box_mode=box_mode
-            )
-            ds = ufl.Measure("ds", domain=mesh)
-
-    dx = ufl.Measure("dx", domain=mesh, subdomain_data=cells_tags)
-    dS = ufl.Measure("dS", domain=mesh, subdomain_data=facets_tags)
-
-    measures = {"dx": dx, "dS": dS, "ds": ds}
-
-results["Reference_error"] = np.empty_like(results["dof"][:]).astype(np.float64)
-results["Reference_error"][:] = np.nan
-
-reference_fe_space = dfx.fem.functionspace(mesh, fe_element)
-reference_levelset_space = dfx.fem.functionspace(mesh, levelset_element)
-reference_dg0_space = dfx.fem.functionspace(mesh, dg0_element)
-reference_fh = dfx.fem.Function(reference_fe_space)
-reference_fh.interpolate(source_term)
-reference_phih = dfx.fem.Function(reference_levelset_space)
-
-if dual:
-    reference_phih.interpolate(levelset, cells_tags.find(2))
-else:
-    reference_phih.interpolate(levelset)
-
-if exact_sol_available:
-    reference_u = dfx.fem.Function(reference_fe_space)
-    reference_u.interpolate(exact_solution)
-else:
-    if dual:
-        reference_mixed_space = dfx.fem.functionspace(mesh, mxd_element)
-        reference_u = phifem_dual_solve(
-            reference_mixed_space, reference_fh, reference_phih, measures, coefs
-        )[0]
-    else:
-        reference_solution_space = dfx.fem.functionspace(mesh, solution_element)
-        reference_spaces = {
-            "primal": reference_fe_space,
-            "solution": reference_solution_space,
-        }
-        reference_u = phifem_direct_solve(
-            reference_spaces, reference_fh, reference_phih, measures, coefs
-        )[0]
-
-save_function(reference_u, os.path.join(output_dir, "reference_u.xdmf"))
-
-reference_space = reference_u.function_space
-for j in range(i):
-    coarse_mesh = adios4dolfinx.read_mesh(
-        os.path.join(checkpoint_dir, f"checkpoint_{str(j).zfill(2)}.bp"),
-        comm=MPI.COMM_WORLD,
-    )
-
-    if dual:
-        coarse_space = dfx.fem.functionspace(coarse_mesh, fe_element)
-    else:
-        coarse_space = dfx.fem.functionspace(coarse_mesh, solution_element)
-
-    coarse_solution = dfx.fem.Function(coarse_space)
-    adios4dolfinx.read_function(
-        os.path.join(checkpoint_dir, f"checkpoint_{str(j).zfill(2)}.bp"),
-        coarse_solution,
-        name="solution",
-    )
-
-    num_reference_cells = mesh.topology.index_map(cdim).size_global
-    reference_cells = np.arange(num_reference_cells)
-    nmm_coarse_space2ref_space = dfx.fem.create_interpolation_data(
-        reference_space, coarse_space, reference_cells, padding=1.0e-14
-    )
-
-    reference_coarse_u = dfx.fem.Function(reference_space)
-    reference_coarse_u.interpolate_nonmatching(
-        coarse_solution, reference_cells, nmm_coarse_space2ref_space
-    )
-
-    save_function(
-        reference_coarse_u,
-        os.path.join(output_dir, f"reference_coarse_u_{str(j).zfill(2)}.xdmf"),
-    )
-
-    diff = dfx.fem.Function(reference_space)
-    diff.x.array[:] = reference_u.x.array[:] - reference_coarse_u.x.array[:]
-
-    save_function(
-        diff, os.path.join(output_dir, f"reference_diff_{str(j).zfill(2)}.xdmf")
-    )
-    x_ufl = ufl.SpatialCoordinate(mesh)
-    detection_levelset = generate_detection_levelset(ufl)(x_ufl)
-    cells_tags = compute_tags_measures(
-        mesh, detection_levelset, detection_degree, box_mode=box_mode
-    )[0]
-
-    reference_dx = ufl.Measure("dx", domain=mesh, subdomain_data=cells_tags)
-    fine_v0 = ufl.TestFunction(reference_dg0_space)
-    grad_diff = ufl.grad(diff)
-    h10_norm_diff = ufl.inner(grad_diff, grad_diff) * fine_v0 * reference_dx((1, 2))
-    h10_norm_form = dfx.fem.form(h10_norm_diff)
-    h10_norm_vec = assemble_vector(h10_norm_form)
-
-    h10_norm_h = dfx.fem.Function(reference_dg0_space)
-    h10_norm_h.x.array[:] = h10_norm_vec.array[:]
-
-    save_function(
-        h10_norm_h, os.path.join(output_dir, f"reference_error_{str(j).zfill(2)}.xdmf")
-    )
-
-    results["Reference_error"][j] = np.sqrt(h10_norm_vec.array.sum())
-
-    df = pl.DataFrame(results)
-    print(df)
-    df.write_csv(os.path.join(output_dir, "results.csv"))

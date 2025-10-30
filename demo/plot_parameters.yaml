@@ -1,0 +1,71 @@
+phifem: 
+  name: "$\\varphi$-FEM, $\\eta_1$"
+  marker: "p"
+phifem-dir:
+  name: "$\\varphi$-FEM, $\\eta_2$"
+  marker: "s"
+phifem-bdy:
+  name: "$\\varphi$-FEM, $\\eta_3$"
+  marker: "*"
+phifem-dir-bdy:
+  name: "$\\varphi$-FEM, $\\eta$"
+  marker: "^"
+fem:
+  name: "FEM, $\\eta_1$"
+  marker: "o"
+estimator:
+  name: "$\\eta$"
+  line: "--"
+  color: "#e41a1c"
+error:
+  name: "$\\|e\\|_{1,\\Omega}$"
+  line: "-"
+  color: "#377eb8"
+total_error:
+  name: "$|||(u,p) - (u_h, p_h)|||_{\\Omega}$"
+  line: "-."
+  color: "#4daf4a"
+l2_p_error:
+  name: "$\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|h_T^{-1}(p - p_h)\\|_{T \\cap \\Omega}$"
+  line: "-"
+  color: "#984ea3"
+eta_T:
+  name: "$\\eta_r$"
+  line: "-."
+  color: "#8dd3c7"
+eta_E:
+  name: "$\\eta_J$"
+  line: "-."
+  color: "#fb8072"
+eta_p:
+  name: "$\\eta_{\\mathrm{BC}}$"
+  line: "-."
+  color: "#b3de69"
+eta_1_z:
+  name: "$\\eta_{1,\\mathrm{geo}}$"
+  line: "-."
+  color: "#bebada"
+eta_0_z:
+  name: "$\\eta_{0,\\mathrm{geo}}$"
+  line: "-."
+  color: "#fccde5"
+source_term_osc:
+  name: "$\\mathrm{osc.}_f$"
+  line: ":"
+  color: "#fbb4ae"
+dirichlet_data_osc:
+  name: "$\\mathrm{osc.}_g$"
+  line: ":"
+  color: "#b3cde3"
+xi_h10:
+  name: "$|\\xi|_{1,\\Omega}$"
+  line: "-"
+  color: "#decbe4" 
+xi_l2:
+  name: "$\\sum_{T \\in T_h^{\\Gamma}} h_T^{-1}\\|\\xi\\|_{0,T}$"
+  line: "-"
+  color: "#fddaec"
+meshtags:
+  cells: ["#2166ac", "#ef8a62", "#b2182b"]
+  facets: ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#ffff33"]
+legend_text_size: 8

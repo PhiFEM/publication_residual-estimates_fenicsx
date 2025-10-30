@@ -22,7 +22,7 @@ def generate_source_term(mode):
 
 def generate_dirichlet_data(mode):
     def dirichlet_data(x):
-        return mode.sqrt((x[0] - 1.0) ** 2 + x[1] ** 2) ** (2.0 / 3.0)
+        return mode.exp(-((x[0] - 1.0) ** 2 + x[1] ** 2) * 10.0)
 
     return dirichlet_data
 

@@ -4,3 +4,7 @@ phifem
 polars
 Pyaml
 meshtagsplot
+ngsolve
+ngsPETSc
+pyvista[jupyter]
+plotly
