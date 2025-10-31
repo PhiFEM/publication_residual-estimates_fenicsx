@@ -16,7 +16,6 @@ from mpi4py import MPI
 from phifem.mesh_scripts import compute_tags_measures
 from plots import plot_mesh, plot_scalar, plot_tags
 from utils import (
-    cell_diameter,
     compute_boundary_local_estimators,
     marking,
     phifem_direct_solve,
@@ -241,7 +240,6 @@ for i in range(iterations_num):
 
     levelset = generate_levelset(np)
     phih = dfx.fem.Function(levelset_space)
-    adios4dolfinx.write_function(checkpoint_file, phih, name="levelset")
 
     if dual:
         phih.interpolate(levelset, cells_tags.find(2))
@@ -251,6 +249,7 @@ for i in range(iterations_num):
         phih.interpolate(levelset)
         phih_plot = phih
 
+    adios4dolfinx.write_function(checkpoint_file, phih_plot, name="levelset")
     plot_scalar(phih_plot, os.path.join(levelsets_dir, f"levelset_{str(i).zfill(2)}"))
     plot_scalar(
         phih_plot,
@@ -259,10 +258,8 @@ for i in range(iterations_num):
     )
 
     u_space = dfx.fem.functionspace(mesh, fe_element)
-    source_term = generate_source_term(ufl)
-    dirichlet_data = generate_dirichlet_data(ufl)
-    x = ufl.SpatialCoordinate(mesh)
-    fh = source_term(x)
+    source_term = generate_source_term(np)
+    dirichlet_data = generate_dirichlet_data(np)
     fh = dfx.fem.Function(u_space)
     fh.interpolate(source_term)
     gh = dfx.fem.Function(u_space)

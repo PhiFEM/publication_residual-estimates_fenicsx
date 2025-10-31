@@ -99,20 +99,8 @@ def compute_boundary_local_estimators(
         facets_to_refine,
         option=RefinementOption.parent_cell,
     )
-    # WARNING: child-parent cells map "parent_cells" returned by refine is not correct! The correct mapping is obtained via the following trick, inspired by https://fenicsproject.discourse.group/t/mesh-refinement-using-dolfinx-mesh-refine-plaza/15168/4
+    parent_cells = compute_parent_cells(dummy_mesh, fine_mesh, parent_cells)
     fine_cells_tags = dfx.mesh.transfer_meshtag(cells_tags, fine_mesh, parent_cells)
-    num_cells_dummy = dummy_mesh.topology.index_map(cdim).size_global
-    parent_ct_indices = np.arange(num_cells_dummy).astype(np.int32)
-    parent_ct_markers = parent_ct_indices
-    sorted_indices = np.argsort(parent_ct_indices)
-    parent_ct = dfx.mesh.meshtags(
-        fine_mesh,
-        cdim,
-        parent_ct_indices[sorted_indices],
-        parent_ct_markers[sorted_indices],
-    )
-    parent_cells_tags = dfx.mesh.transfer_meshtag(parent_ct, fine_mesh, parent_cells)
-    parent_cells = parent_cells_tags.values
 
     phih_space = phih.function_space
     fine_element = phih_space.ufl_element()

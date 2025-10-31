@@ -113,15 +113,6 @@ for i in range(iterations_num):
     results["dof"].append(len(active_dofs))
     dg0_space = dfx.fem.functionspace(mesh, dg0_element)
 
-    """
-    source_term = generate_source_term(ufl)
-    dirichlet_data = generate_dirichlet_data(ufl)
-    x = ufl.SpatialCoordinate(mesh)
-    fh = source_term(x) - ufl.div(ufl.grad(dirichlet_data(x)))
-    # fh = dfx.fem.Function(u_space)
-    # fh.interpolate(source_term)
-    gh = dfx.fem.Function(fe_space)
-    """
     source_term = generate_source_term(np)
     dirichlet_data = generate_dirichlet_data(np)
     fh = dfx.fem.Function(fe_space)

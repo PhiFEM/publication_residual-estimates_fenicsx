@@ -10,13 +10,14 @@ import polars as pl
 import ufl
 import yaml
 from basix.ufl import element
+from dolfinx.cpp.refinement import RefinementOption
 from dolfinx.fem.petsc import assemble_vector
 from mpi4py import MPI
 
 sys.path.append("../")
 
 from plots import plot_scalar
-from utils import cell_diameter, compute_xi_ref, fem_solve
+from utils import cell_diameter, compute_parent_cells, compute_xi_ref, fem_solve
 
 parent_dir = os.path.dirname(__file__)
 
@@ -97,6 +98,11 @@ levelset = generate_levelset(np)
 
 reference_solution = fem_solve(reference_space, f_ref, g_ref)
 
+plot_scalar(
+    reference_solution,
+    os.path.join(errors_dir, "reference_solution"),
+)
+
 results = pl.read_csv(os.path.join(output_dir, "results.csv")).to_dict()
 results["error"] = [np.nan] * iterations_num
 results["l2_p_error"] = [np.nan] * iterations_num
@@ -162,9 +168,6 @@ for i in range(iterations_num):
         cut_indicator = dfx.fem.Function(dg0_space)
         cut_indicator.x.array[cells_tags.find(2)] = 1.0
 
-    plot_scalar(
-        cut_indicator, os.path.join(errors_dir, f"cut_indicator_{str(i).zfill(2)}")
-    )
     solution_ref = dfx.fem.Function(reference_space)
 
     num_cells = mesh.topology.index_map(cdim).size_global
@@ -207,9 +210,17 @@ for i in range(iterations_num):
     ref_mesh_indicator.x.array[:] = 1.0
 
     coarse_mesh = solution_u.function_space.mesh
-    cf_mesh = dfx.mesh.refine(coarse_mesh)[0]
-    cf_mesh.topology.create_entities(cdim - 1)
-    cf_mesh = dfx.mesh.refine(cf_mesh)[0]
+    cf_mesh_1, parent_cells = dfx.mesh.refine(
+        coarse_mesh, option=RefinementOption.parent_cell
+    )[:2]
+    parent_cells = compute_parent_cells(coarse_mesh, cf_mesh_1, parent_cells)
+    cells_tags_1 = dfx.mesh.transfer_meshtag(cells_tags, cf_mesh_1, parent_cells)
+    cf_mesh_1.topology.create_entities(cdim - 1)
+    cf_mesh = dfx.mesh.refine(cf_mesh_1, option=RefinementOption.parent_cell)[0]
+    parent_cells = compute_parent_cells(cf_mesh_1, cf_mesh, parent_cells)
+    cf_cells_tags = dfx.mesh.transfer_meshtag(cells_tags_1, cf_mesh, parent_cells)
+
+    dx = ufl.Measure("dx", domain=cf_mesh, subdomain_data=cf_cells_tags)
 
     cf_cg2_space = dfx.fem.functionspace(cf_mesh, cg2_element)
     cf_dg2_space = dfx.fem.functionspace(cf_mesh, dg2_element)
@@ -219,7 +230,7 @@ for i in range(iterations_num):
     nmm_fe_space2cf_space = dfx.fem.create_interpolation_data(
         cf_cg2_space, fe_space, cf_all_cells, padding=1.0e-14
     )
-    nmm_levelset_space2cf_space = dfx.fem.create_interpolation_data(
+    nmm_levelset_space2cf_cg2_space = dfx.fem.create_interpolation_data(
         cf_cg2_space, levelset_space, cf_all_cells, padding=1.0e-14
     )
     nmm_dg1_space2cf_dg2_space = dfx.fem.create_interpolation_data(
@@ -235,23 +246,20 @@ for i in range(iterations_num):
         cf_dg0_space, dg0_ref_space, cf_all_cells, padding=1.0e-14
     )
     cf_solution_p = dfx.fem.Function(cf_dg2_space)
-    cf_cut_indicator = dfx.fem.Function(cf_dg0_space)
     cf_levelset = dfx.fem.Function(cf_cg2_space)
+    omega_indicator = dfx.fem.Function(dg0_ref_space)
+    omega_indicator.x.array[:] = 1.0
+    cf_omega_indicator = dfx.fem.Function(cf_dg0_space)
+    cf_omega_indicator.interpolate_nonmatching(
+        omega_indicator, cf_all_cells, nmm_dg0_ref_space2cf_dg0_space
+    )
 
     cf_levelset.interpolate_nonmatching(
-        fe_levelset, cf_all_cells, nmm_levelset_space2cf_space
+        fe_levelset, cf_all_cells, nmm_levelset_space2cf_cg2_space
     )
 
     cf_solution_p.interpolate_nonmatching(
         solution_p, cf_all_cells, nmm_dg1_space2cf_dg2_space
-    )
-    cf_cut_indicator.interpolate_nonmatching(
-        ref_cut_indicator, cf_all_cells, nmm_dg0_ref_space2cf_dg0_space
-    )
-
-    plot_scalar(
-        cf_cut_indicator,
-        os.path.join(errors_dir, f"cf_cut_indicator_{str(i).zfill(2)}"),
     )
 
     coarse_mesh_h_T = cell_diameter(dg0_space)
@@ -263,9 +271,29 @@ for i in range(iterations_num):
     cf_g = dfx.fem.Function(cf_cg2_space)
     cf_g.interpolate(dirichlet_data)
 
+    plot_scalar(cf_g, os.path.join(errors_dir, f"cf_g_{str(i).zfill(2)}"))
+
     cf_reference_solution = dfx.fem.Function(cf_cg2_space)
     cf_reference_solution.interpolate_nonmatching(
         reference_solution, cf_all_cells, nmm_ref_space2cf_space
+    )
+
+    plot_scalar(
+        cf_reference_solution,
+        os.path.join(errors_dir, f"cf_reference_solution_{str(i).zfill(2)}"),
+    )
+
+    plot_scalar(
+        cf_solution_p,
+        os.path.join(errors_dir, f"cf_solution_p_{str(i).zfill(2)}"),
+    )
+    plot_scalar(
+        cf_levelset,
+        os.path.join(errors_dir, f"cf_levelset_{str(i).zfill(2)}"),
+    )
+    plot_scalar(
+        cf_coarse_mesh_h_T,
+        os.path.join(errors_dir, f"cf_coarse_mesh_h_T_{str(i).zfill(2)}"),
     )
 
     h_t_reference_p = cf_reference_solution - cf_g
@@ -276,9 +304,9 @@ for i in range(iterations_num):
     l2_norm_p_int = (
         cf_coarse_mesh_h_T ** (-2)
         * ufl.inner(p_diff, p_diff)
-        * cf_cut_indicator
+        * cf_omega_indicator
         * cf_v0
-        * ufl.dx
+        * dx(2)
     )
     l2_norm_p_form = dfx.fem.form(l2_norm_p_int)
     l2_p_err_vec = dfx.fem.assemble_vector(l2_norm_p_form)
