@@ -1,6 +1,5 @@
 import argparse
 import os
-import shutil
 import sys
 
 import adios4dolfinx
@@ -17,7 +16,15 @@ from mpi4py import MPI
 sys.path.append("../")
 
 from plots import plot_scalar
-from utils import cell_diameter, compute_parent_cells, compute_xi_ref, fem_solve
+from utils import (
+    cell_diameter,
+    compute_dirichlet_oscillations,
+    compute_h10_error,
+    compute_parent_cells,
+    compute_source_term_oscillations,
+    compute_xi_h10_l2,
+    fem_solve,
+)
 
 parent_dir = os.path.dirname(__file__)
 
@@ -85,18 +92,18 @@ dg1_element = element("DG", cell_name, 1)
 dg2_element = element("DG", cell_name, 2)
 
 reference_space = dfx.fem.functionspace(reference_mesh, cg2_element)
-dg0_ref_space = dfx.fem.functionspace(reference_mesh, dg0_element)
+ref_dg0_space = dfx.fem.functionspace(reference_mesh, dg0_element)
 
 source_term = generate_source_term(np)
-f_ref = dfx.fem.Function(reference_space)
-f_ref.interpolate(source_term)
+ref_f = dfx.fem.Function(reference_space)
+ref_f.interpolate(source_term)
 dirichlet_data = generate_dirichlet_data(np)
-g_ref = dfx.fem.Function(reference_space)
-g_ref.interpolate(dirichlet_data)
+ref_g = dfx.fem.Function(reference_space)
+ref_g.interpolate(dirichlet_data)
 
 levelset = generate_levelset(np)
 
-reference_solution = fem_solve(reference_space, f_ref, g_ref)
+reference_solution = fem_solve(reference_space, ref_f, ref_g)
 
 plot_scalar(
     reference_solution,
@@ -179,18 +186,27 @@ for i in range(iterations_num):
         solution_u, reference_cells, nmm_coarse_space2ref_space
     )
 
-    ref_cut_indicator = dfx.fem.Function(dg0_ref_space)
+    ref_cut_indicator = dfx.fem.Function(ref_dg0_space)
     nmm_coarse_dg0_space2ref_dg0_space = dfx.fem.create_interpolation_data(
-        dg0_ref_space, dg0_space, reference_cells, padding=1.0e-14
+        ref_dg0_space, dg0_space, reference_cells, padding=1.0e-14
     )
     ref_cut_indicator.interpolate_nonmatching(
         cut_indicator, reference_cells, nmm_coarse_dg0_space2ref_dg0_space
     )
 
-    h10_err = h10_norm_ref.x.array.sum()
+    ref_h10_norm, coarse_h10_norm = compute_h10_error(
+        solution_u, reference_solution, ref_dg0_space, dg0_space
+    )
+
+    if coarse_h10_norm is not None:
+        plot_scalar(
+            coarse_h10_norm, os.path.join(errors_dir, f"h10_error_{str(i).zfill(2)}")
+        )
+
+    h10_err = ref_h10_norm.x.array.sum()
     results["error"][i] = np.sqrt(h10_err)
 
-    ref_mesh_indicator = dfx.fem.Function(dg0_ref_space)
+    ref_mesh_indicator = dfx.fem.Function(ref_dg0_space)
     ref_mesh_indicator.x.array[:] = 1.0
 
     coarse_mesh = solution_u.function_space.mesh
@@ -227,11 +243,11 @@ for i in range(iterations_num):
         cf_dg0_space, dg0_space, cf_all_cells, padding=1.0e-14
     )
     nmm_dg0_ref_space2cf_dg0_space = dfx.fem.create_interpolation_data(
-        cf_dg0_space, dg0_ref_space, cf_all_cells, padding=1.0e-14
+        cf_dg0_space, ref_dg0_space, cf_all_cells, padding=1.0e-14
     )
     cf_solution_p = dfx.fem.Function(cf_dg2_space)
     cf_levelset = dfx.fem.Function(cf_cg2_space)
-    omega_indicator = dfx.fem.Function(dg0_ref_space)
+    omega_indicator = dfx.fem.Function(ref_dg0_space)
     omega_indicator.x.array[:] = 1.0
     cf_omega_indicator = dfx.fem.Function(cf_dg0_space)
     cf_omega_indicator.interpolate_nonmatching(
@@ -305,86 +321,37 @@ for i in range(iterations_num):
     triple_norm_err = np.sqrt(h10_err + l2_p_err)
     results["triple_norm_error"][i] = triple_norm_err
 
-    try:
-        nmm_ref_space2coarse_space = dfx.fem.create_interpolation_data(
-            dg0_space, dg0_ref_space, all_cells, padding=1.0e-20
-        )
-        h10_norm_coarse = dfx.fem.Function(dg0_space)
-        h10_norm_coarse.interpolate_nonmatching(
-            h10_norm_ref, all_cells, nmm_ref_space2coarse_space
-        )
-        plot_scalar(
-            h10_norm_coarse,
-            os.path.join(errors_dir, f"error_{str(i).zfill(2)}"),
-        )
-    except RuntimeError:
-        print(
-            f"Failed to interpolate h10_norm to coarse space at iteration {str(i).zfill(2)}."
-        )
-        pass
-
     # Source term oscillations estimation
     fh = dfx.fem.Function(fe_space)
     fh.interpolate(source_term)
 
-    fh_ref = dfx.fem.Function(reference_space)
-    fh_ref.interpolate_nonmatching(fh, reference_cells, nmm_coarse_space2ref_space)
-    f_diff = dfx.fem.Function(reference_space)
-    f_diff.x.array[:] = fh_ref.x.array[:] - f_ref.x.array[:]
+    ref_osc_f, coarse_osc_f = compute_source_term_oscillations(
+        fh, ref_f, ref_dg0_space, dg0_space
+    )
 
-    h_T_ref = cell_diameter(dg0_ref_space)
-
-    osc_f_int = h_T_ref**2 * ufl.inner(f_diff, f_diff) * ref_v0 * ufl.dx
-    osc_f_form = dfx.fem.form(osc_f_int)
-    osc_f_vec = assemble_vector(osc_f_form)
-    osc_f_ref = dfx.fem.Function(dg0_ref_space)
-    osc_f_ref.x.array[:] = osc_f_vec.array[:]
-
-    results["source_term_osc"][i] = np.sqrt(osc_f_ref.x.array.sum())
+    plot_scalar(
+        coarse_osc_f, os.path.join(errors_dir, f"source_term_osc_{str(i).zfill(2)}")
+    )
+    results["source_term_osc"][i] = np.sqrt(ref_osc_f.x.array.sum())
 
     # Dirichlet data oscillations estimation
     gh = dfx.fem.Function(fe_space)
     gh.interpolate(dirichlet_data)
 
-    gh_ref = dfx.fem.Function(reference_space)
-    gh_ref.interpolate_nonmatching(gh, reference_cells, nmm_coarse_space2ref_space)
-    g_diff = dfx.fem.Function(reference_space)
-    g_diff.x.array[:] = gh_ref.x.array[:] - g_ref.x.array[:]
-
-    osc_g_int = (
-        ref_cut_indicator
-        * ufl.inner(ufl.grad(g_diff), ufl.grad(g_diff))
-        * ref_v0
-        * ufl.dx
+    ref_osc_g, coarse_osc_g = compute_dirichlet_oscillations(
+        gh, ref_g, ref_dg0_space, dg0_space, ref_cut_indicator
     )
-    osc_g_form = dfx.fem.form(osc_g_int)
-    osc_g_vec = assemble_vector(osc_g_form)
-    osc_g_ref = dfx.fem.Function(dg0_ref_space)
-    osc_g_ref.x.array[:] = osc_g_vec.array[:]
 
-    results["dirichlet_data_osc"][i] = np.sqrt(osc_g_ref.x.array.sum())
+    results["dirichlet_data_osc"][i] = np.sqrt(ref_osc_g.x.array.sum())
 
     results["total_error"][i] = np.sqrt(
-        h10_err + l2_p_err + osc_f_ref.x.array.sum() + osc_g_ref.x.array.sum()
+        h10_err + l2_p_err + ref_osc_f.x.array.sum() + ref_osc_g.x.array.sum()
     )
 
-    xi_ref = compute_xi_ref(solution_ref, gh_ref)
+    xi_ref_h10, xi_ref_l2 = compute_xi_h10_l2(solution_ref, ref_g, ref_dg0_space)
 
-    xi_ref_h10_int = ufl.inner(ufl.grad(xi_ref), ufl.grad(xi_ref)) * ref_v0 * ufl.dx
-    xi_ref_h10_form = dfx.fem.form(xi_ref_h10_int)
-    xi_ref_h10_vec = assemble_vector(xi_ref_h10_form)
-    xi_ref_h10_ref = dfx.fem.Function(dg0_ref_space)
-    xi_ref_h10_ref.x.array[:] = xi_ref_h10_vec.array[:]
-
-    results["xi_h10"][i] = np.sqrt(xi_ref_h10_ref.x.array.sum())
-
-    xi_ref_l2_int = h_T_ref ** (-1) * ufl.inner(xi_ref, xi_ref) * ref_v0 * ufl.dx
-    xi_ref_l2_form = dfx.fem.form(xi_ref_l2_int)
-    xi_ref_l2_vec = assemble_vector(xi_ref_l2_form)
-    xi_ref_l2_ref = dfx.fem.Function(dg0_ref_space)
-    xi_ref_l2_ref.x.array[:] = xi_ref_l2_vec.array[:]
-
-    results["xi_l2"][i] = np.sqrt(xi_ref_l2_ref.x.array.sum())
+    results["xi_h10"][i] = np.sqrt(xi_ref_h10.x.array.sum())
+    results["xi_l2"][i] = np.sqrt(xi_ref_l2.x.array.sum())
 
     df = pl.DataFrame(results)
     print(df)

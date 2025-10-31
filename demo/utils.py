@@ -523,17 +523,32 @@ def marking(est_h, dorfler_param):
     return facets_indices, cells_indices
 
 
-def compute_xi_ref(solution_u_ref, g_ref):
+def compute_xi_h10_l2(solution_u_ref, g_ref, ref_dg0_space):
     ref_space = solution_u_ref.function_space
     xi_source_term = dfx.fem.Function(ref_space)
     xi_dirichlet_data = dfx.fem.Function(ref_space)
     xi_dirichlet_data.x.array[:] = solution_u_ref.x.array[:] - g_ref.x.array[:]
     xi_ref = fem_solve(solution_u_ref.function_space, xi_source_term, xi_dirichlet_data)
-    return xi_ref
+
+    ref_v0 = ufl.TestFunction(ref_dg0_space)
+    xi_ref_h10_int = ufl.inner(ufl.grad(xi_ref), ufl.grad(xi_ref)) * ref_v0 * ufl.dx
+    xi_ref_h10_form = dfx.fem.form(xi_ref_h10_int)
+    xi_ref_h10_vec = assemble_vector(xi_ref_h10_form)
+    xi_ref_h10 = dfx.fem.Function(ref_dg0_space)
+    xi_ref_h10.x.array[:] = xi_ref_h10_vec.array[:]
+
+    h_T_ref = cell_diameter(ref_dg0_space)
+    xi_ref_l2_int = h_T_ref ** (-1) * ufl.inner(xi_ref, xi_ref) * ref_v0 * ufl.dx
+    xi_ref_l2_form = dfx.fem.form(xi_ref_l2_int)
+    xi_ref_l2_vec = assemble_vector(xi_ref_l2_form)
+    xi_ref_l2 = dfx.fem.Function(ref_dg0_space)
+    xi_ref_l2.x.array[:] = xi_ref_l2_vec.array[:]
+    return xi_ref_h10, xi_ref_l2
 
 
-def compute_h10_error(solution_u, reference_solution, ref_dg0_space):
+def compute_h10_error(solution_u, reference_solution, ref_dg0_space, dg0_space):
     coarse_space = solution_u.function_space
+    coarse_mesh = coarse_space.mesh
     reference_space = reference_solution.function_space
     reference_mesh = reference_space.mesh
     ref_solution_u = dfx.fem.Function(reference_space)
@@ -554,4 +569,104 @@ def compute_h10_error(solution_u, reference_solution, ref_dg0_space):
     h10_norm_vec = assemble_vector(h10_norm_form)
     ref_h10_norm = dfx.fem.Function(ref_dg0_space)
     ref_h10_norm.x.array[:] = h10_norm_vec.array[:]
-    return ref_h10_norm
+
+    coarse_h10_norm = None
+    try:
+        num_cells = coarse_mesh.topology.index_map(cdim).size_global
+        all_cells = np.arange(num_cells)
+        nmm_ref_space2coarse_space = dfx.fem.create_interpolation_data(
+            dg0_space, ref_dg0_space, all_cells, padding=1.0e-20
+        )
+        coarse_h10_norm = dfx.fem.Function(dg0_space)
+        coarse_h10_norm.interpolate_nonmatching(
+            ref_h10_norm, all_cells, nmm_ref_space2coarse_space
+        )
+    except RuntimeError:
+        print("Failed to interpolate h10_norm to coarse space.")
+        pass
+    return ref_h10_norm, coarse_h10_norm
+
+
+def compute_source_term_oscillations(fh, ref_f, ref_dg0_space, dg0_space):
+    h_T_ref = cell_diameter(ref_dg0_space)
+    coarse_space = fh.function_space
+    coarse_mesh = coarse_space.mesh
+    reference_space = ref_f.function_space
+    reference_mesh = reference_space.mesh
+    ref_fh = dfx.fem.Function(reference_space)
+
+    cdim = reference_mesh.topology.dim
+    num_reference_cells = reference_mesh.topology.index_map(cdim).size_global
+    reference_cells = np.arange(num_reference_cells)
+    nmm_coarse2ref = dfx.fem.create_interpolation_data(
+        reference_space, coarse_space, reference_cells, padding=1.0e-14
+    )
+
+    ref_fh.interpolate_nonmatching(fh, reference_cells, nmm_coarse2ref)
+
+    diff = ref_f - ref_fh
+    ref_v0 = ufl.TestFunction(ref_dg0_space)
+    st_osc_norm_diff = h_T_ref**2 * ufl.inner(diff, diff) * ref_v0 * ufl.dx
+    st_osc_norm_form = dfx.fem.form(st_osc_norm_diff)
+    st_osc_norm_vec = assemble_vector(st_osc_norm_form)
+    ref_st_osc_norm = dfx.fem.Function(ref_dg0_space)
+    ref_st_osc_norm.x.array[:] = st_osc_norm_vec.array[:]
+
+    coarse_st_osc_norm = None
+    try:
+        num_cells = coarse_mesh.topology.index_map(cdim).size_global
+        all_cells = np.arange(num_cells)
+        nmm_ref_space2coarse_space = dfx.fem.create_interpolation_data(
+            dg0_space, ref_dg0_space, all_cells, padding=1.0e-20
+        )
+        coarse_st_osc_norm = dfx.fem.Function(dg0_space)
+        coarse_st_osc_norm.interpolate_nonmatching(
+            ref_st_osc_norm, all_cells, nmm_ref_space2coarse_space
+        )
+    except RuntimeError:
+        print("Failed to interpolate h10_norm to coarse space.")
+        pass
+    return ref_st_osc_norm, coarse_st_osc_norm
+
+
+def compute_dirichlet_oscillations(
+    gh, ref_g, ref_dg0_space, dg0_space, ref_cut_indicator
+):
+    coarse_space = gh.function_space
+    coarse_mesh = coarse_space.mesh
+    reference_space = ref_g.function_space
+    reference_mesh = reference_space.mesh
+    ref_gh = dfx.fem.Function(reference_space)
+
+    cdim = reference_mesh.topology.dim
+    num_reference_cells = reference_mesh.topology.index_map(cdim).size_global
+    reference_cells = np.arange(num_reference_cells)
+    nmm_coarse2ref = dfx.fem.create_interpolation_data(
+        reference_space, coarse_space, reference_cells, padding=1.0e-14
+    )
+
+    ref_gh.interpolate_nonmatching(gh, reference_cells, nmm_coarse2ref)
+
+    diff = ufl.grad(ref_g - ref_gh)
+    ref_v0 = ufl.TestFunction(ref_dg0_space)
+    dir_osc_norm_diff = ref_cut_indicator * ufl.inner(diff, diff) * ref_v0 * ufl.dx
+    dir_osc_norm_form = dfx.fem.form(dir_osc_norm_diff)
+    dir_osc_norm_vec = assemble_vector(dir_osc_norm_form)
+    ref_dir_osc_norm = dfx.fem.Function(ref_dg0_space)
+    ref_dir_osc_norm.x.array[:] = dir_osc_norm_vec.array[:]
+
+    coarse_dir_osc_norm = None
+    try:
+        num_cells = coarse_mesh.topology.index_map(cdim).size_global
+        all_cells = np.arange(num_cells)
+        nmm_ref_space2coarse_space = dfx.fem.create_interpolation_data(
+            dg0_space, ref_dg0_space, all_cells, padding=1.0e-20
+        )
+        coarse_dir_osc_norm = dfx.fem.Function(dg0_space)
+        coarse_dir_osc_norm.interpolate_nonmatching(
+            ref_dir_osc_norm, all_cells, nmm_ref_space2coarse_space
+        )
+    except RuntimeError:
+        print("Failed to interpolate h10_norm to coarse space.")
+        pass
+    return ref_dir_osc_norm, coarse_dir_osc_norm
