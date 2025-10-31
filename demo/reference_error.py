@@ -63,6 +63,7 @@ with open(os.path.join(source_dir, parameters_name + ".yaml"), "rb") as f:
 
 iterations_num = parameters["iterations_number"]
 fe_degree = parameters["finite_element_degree"]
+auxiliar_degree = parameters["auxiliary_degree"]
 levelset_degree = parameters["levelset_degree"]
 
 with open(os.path.join(source_dir, "reference.yaml"), "rb") as f:
@@ -88,11 +89,13 @@ cg1_element = element("CG", cell_name, fe_degree)
 cg2_element = element("CG", cell_name, fe_degree + 1)
 levelset_element = element("Lagrange", cell_name, levelset_degree)
 dg0_element = element("DG", cell_name, 0)
-dg1_element = element("DG", cell_name, 1)
+dg1_element = element("DG", cell_name, auxiliar_degree)
 dg2_element = element("DG", cell_name, 2)
 
 reference_space = dfx.fem.functionspace(reference_mesh, cg2_element)
+reference_levelset_space = dfx.fem.functionspace(reference_mesh, levelset_element)
 ref_dg0_space = dfx.fem.functionspace(reference_mesh, dg0_element)
+ref_dg1_space = dfx.fem.functionspace(reference_mesh, dg1_element)
 
 source_term = generate_source_term(np)
 ref_f = dfx.fem.Function(reference_space)
@@ -133,10 +136,8 @@ for i in range(iterations_num):
     dg1_space = dfx.fem.functionspace(mesh, dg1_element)
     dg0_space = dfx.fem.functionspace(mesh, dg0_element)
     solution_u = dfx.fem.Function(fe_space)
-    fe_levelset = dfx.fem.Function(levelset_space)
     solution_p = dfx.fem.Function(dg1_space)
-    fe_levelset = dfx.fem.Function(fe_space)
-    fe_levelset.interpolate(levelset)
+    fe_levelset = dfx.fem.Function(levelset_space)
 
     adios4dolfinx.read_function(
         os.path.join(
@@ -175,14 +176,14 @@ for i in range(iterations_num):
         cut_indicator = dfx.fem.Function(dg0_space)
         cut_indicator.x.array[cells_tags.find(2)] = 1.0
 
-    solution_ref = dfx.fem.Function(reference_space)
+    ref_solution_u = dfx.fem.Function(reference_space)
 
     num_cells = mesh.topology.index_map(cdim).size_global
     all_cells = np.arange(num_cells)
     nmm_coarse_space2ref_space = dfx.fem.create_interpolation_data(
         reference_space, fe_space, reference_cells, padding=1.0e-14
     )
-    solution_ref.interpolate_nonmatching(
+    ref_solution_u.interpolate_nonmatching(
         solution_u, reference_cells, nmm_coarse_space2ref_space
     )
 
@@ -192,6 +193,11 @@ for i in range(iterations_num):
     )
     ref_cut_indicator.interpolate_nonmatching(
         cut_indicator, reference_cells, nmm_coarse_dg0_space2ref_dg0_space
+    )
+
+    plot_scalar(
+        ref_cut_indicator,
+        os.path.join(errors_dir, f"ref_cut_indicator_{str(i).zfill(2)}"),
     )
 
     ref_h10_norm, coarse_h10_norm = compute_h10_error(
@@ -230,91 +236,72 @@ for i in range(iterations_num):
     nmm_fe_space2cf_space = dfx.fem.create_interpolation_data(
         cf_cg2_space, fe_space, cf_all_cells, padding=1.0e-14
     )
-    nmm_levelset_space2cf_cg2_space = dfx.fem.create_interpolation_data(
-        cf_cg2_space, levelset_space, cf_all_cells, padding=1.0e-14
+    nmm_levelset_space2ref_levelset_space = dfx.fem.create_interpolation_data(
+        reference_levelset_space, levelset_space, reference_cells, padding=1.0e-14
     )
-    nmm_dg1_space2cf_dg2_space = dfx.fem.create_interpolation_data(
-        cf_dg2_space, dg1_space, cf_all_cells, padding=1.0e-14
+    nmm_dg1_space2ref_dg1_space = dfx.fem.create_interpolation_data(
+        ref_dg1_space, dg1_space, reference_cells, padding=1.0e-14
     )
     nmm_ref_space2cf_space = dfx.fem.create_interpolation_data(
         cf_cg2_space, reference_space, cf_all_cells, padding=1.0e-14
     )
-    nmm_dg0_space2cf_dg0_space = dfx.fem.create_interpolation_data(
-        cf_dg0_space, dg0_space, cf_all_cells, padding=1.0e-14
-    )
     nmm_dg0_ref_space2cf_dg0_space = dfx.fem.create_interpolation_data(
         cf_dg0_space, ref_dg0_space, cf_all_cells, padding=1.0e-14
     )
-    cf_solution_p = dfx.fem.Function(cf_dg2_space)
-    cf_levelset = dfx.fem.Function(cf_cg2_space)
+    ref_solution_p = dfx.fem.Function(ref_dg1_space)
+    ref_levelset = dfx.fem.Function(reference_levelset_space)
     omega_indicator = dfx.fem.Function(ref_dg0_space)
     omega_indicator.x.array[:] = 1.0
-    cf_omega_indicator = dfx.fem.Function(cf_dg0_space)
-    cf_omega_indicator.interpolate_nonmatching(
-        omega_indicator, cf_all_cells, nmm_dg0_ref_space2cf_dg0_space
+
+    ref_levelset.interpolate_nonmatching(
+        fe_levelset, reference_cells, nmm_levelset_space2ref_levelset_space
     )
 
-    cf_levelset.interpolate_nonmatching(
-        fe_levelset, cf_all_cells, nmm_levelset_space2cf_cg2_space
-    )
-
-    cf_solution_p.interpolate_nonmatching(
-        solution_p, cf_all_cells, nmm_dg1_space2cf_dg2_space
+    ref_solution_p.interpolate_nonmatching(
+        solution_p, reference_cells, nmm_dg1_space2ref_dg1_space
     )
 
     coarse_mesh_h_T = cell_diameter(dg0_space)
-    cf_coarse_mesh_h_T = dfx.fem.Function(cf_dg0_space)
-    cf_coarse_mesh_h_T.interpolate_nonmatching(
-        coarse_mesh_h_T, cf_all_cells, nmm_dg0_space2cf_dg0_space
+    plot_scalar(
+        coarse_mesh_h_T, os.path.join(errors_dir, f"coarse_mesh_h_T_{str(i).zfill(2)}")
     )
-
-    cf_g = dfx.fem.Function(cf_cg2_space)
-    cf_g.interpolate(dirichlet_data)
-
-    plot_scalar(cf_g, os.path.join(errors_dir, f"cf_g_{str(i).zfill(2)}"))
-
-    cf_reference_solution = dfx.fem.Function(cf_cg2_space)
-    cf_reference_solution.interpolate_nonmatching(
-        reference_solution, cf_all_cells, nmm_ref_space2cf_space
+    ref_coarse_mesh_h_T = dfx.fem.Function(ref_dg0_space)
+    ref_coarse_mesh_h_T.interpolate_nonmatching(
+        coarse_mesh_h_T, reference_cells, nmm_coarse_dg0_space2ref_dg0_space
     )
 
     plot_scalar(
-        cf_reference_solution,
-        os.path.join(errors_dir, f"cf_reference_solution_{str(i).zfill(2)}"),
-    )
-
-    plot_scalar(
-        cf_solution_p,
-        os.path.join(errors_dir, f"cf_solution_p_{str(i).zfill(2)}"),
+        ref_solution_p,
+        os.path.join(errors_dir, f"ref_solution_p_{str(i).zfill(2)}"),
     )
     plot_scalar(
-        cf_levelset,
-        os.path.join(errors_dir, f"cf_levelset_{str(i).zfill(2)}"),
+        ref_levelset,
+        os.path.join(errors_dir, f"ref_levelset_{str(i).zfill(2)}"),
     )
     plot_scalar(
-        cf_coarse_mesh_h_T,
-        os.path.join(errors_dir, f"cf_coarse_mesh_h_T_{str(i).zfill(2)}"),
+        ref_coarse_mesh_h_T,
+        os.path.join(errors_dir, f"ref_coarse_mesh_h_T_{str(i).zfill(2)}"),
     )
 
-    h_t_reference_p = cf_reference_solution - cf_g
+    h_t_reference_p = reference_solution - ref_g
 
-    p_diff = h_t_reference_p - (cf_solution_p * cf_levelset) / cf_coarse_mesh_h_T
+    p_diff = h_t_reference_p - (ref_solution_p * ref_levelset) / ref_coarse_mesh_h_T
 
-    cf_v0 = ufl.TestFunction(cf_dg0_space)
+    ref_v0 = ufl.TestFunction(ref_dg0_space)
     l2_norm_p_int = (
-        cf_coarse_mesh_h_T ** (-2)
+        ref_coarse_mesh_h_T ** (-2)
         * ufl.inner(p_diff, p_diff)
-        * cf_omega_indicator
-        * cf_v0
-        * dx(2)
+        * ref_cut_indicator
+        * ref_v0
+        * ufl.dx
     )
     l2_norm_p_form = dfx.fem.form(l2_norm_p_int)
     l2_p_err_vec = dfx.fem.assemble_vector(l2_norm_p_form)
 
-    cf_l2_p_err = dfx.fem.Function(cf_dg0_space)
-    cf_l2_p_err.x.array[:] = l2_p_err_vec.array[:]
+    ref_l2_p_err = dfx.fem.Function(ref_dg0_space)
+    ref_l2_p_err.x.array[:] = l2_p_err_vec.array[:]
 
-    plot_scalar(cf_l2_p_err, os.path.join(errors_dir, f"l2_p_err_{str(i).zfill(2)}"))
+    plot_scalar(ref_l2_p_err, os.path.join(errors_dir, f"l2_p_err_{str(i).zfill(2)}"))
     l2_p_err = l2_p_err_vec.array.sum()
 
     results["l2_p_error"][i] = np.sqrt(l2_p_err)
@@ -348,7 +335,7 @@ for i in range(iterations_num):
         h10_err + l2_p_err + ref_osc_f.x.array.sum() + ref_osc_g.x.array.sum()
     )
 
-    xi_ref_h10, xi_ref_l2 = compute_xi_h10_l2(solution_ref, ref_g, ref_dg0_space)
+    xi_ref_h10, xi_ref_l2 = compute_xi_h10_l2(ref_solution_u, ref_g, ref_dg0_space)
 
     results["xi_h10"][i] = np.sqrt(xi_ref_h10.x.array.sum())
     results["xi_l2"][i] = np.sqrt(xi_ref_l2.x.array.sum())
