@@ -187,22 +187,6 @@ for i in range(iterations_num):
         cut_indicator, reference_cells, nmm_coarse_dg0_space2ref_dg0_space
     )
 
-    plot_scalar(
-        ref_cut_indicator,
-        os.path.join(errors_dir, f"ref_cut_indicator_{str(i).zfill(2)}"),
-    )
-
-    diff = dfx.fem.Function(reference_space)
-    diff.x.array[:] = reference_solution.x.array[:] - solution_ref.x.array[:]
-
-    grad_diff = ufl.grad(diff)
-    ref_v0 = ufl.TestFunction(dg0_ref_space)
-    h10_norm_diff = ufl.inner(grad_diff, grad_diff) * ref_v0 * ufl.dx
-    h10_norm_form = dfx.fem.form(h10_norm_diff)
-    h10_norm_vec = assemble_vector(h10_norm_form)
-    h10_norm_ref = dfx.fem.Function(dg0_ref_space)
-    h10_norm_ref.x.array[:] = h10_norm_vec.array[:]
-
     h10_err = h10_norm_ref.x.array.sum()
     results["error"][i] = np.sqrt(h10_err)
 

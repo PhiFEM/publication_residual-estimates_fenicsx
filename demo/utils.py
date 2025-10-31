@@ -67,6 +67,25 @@ def save_function(fct: dfx.fem.Function, file_path: str, mode=dfx.io.XDMFFile):
             of.write_function(fct)
 
 
+def compute_parent_cells(coarse_mesh, fine_mesh, initial_parent_cells):
+    cdim = coarse_mesh.geometry.dim
+    num_cells_dummy = coarse_mesh.topology.index_map(cdim).size_global
+    parent_ct_indices = np.arange(num_cells_dummy).astype(np.int32)
+    parent_ct_markers = parent_ct_indices
+    sorted_indices = np.argsort(parent_ct_indices)
+    parent_ct = dfx.mesh.meshtags(
+        fine_mesh,
+        cdim,
+        parent_ct_indices[sorted_indices],
+        parent_ct_markers[sorted_indices],
+    )
+    parent_cells_tags = dfx.mesh.transfer_meshtag(
+        parent_ct, fine_mesh, initial_parent_cells
+    )
+    parent_cells = parent_cells_tags.values
+    return parent_cells
+
+
 def compute_boundary_local_estimators(
     coarse_mesh,
     solution_p,
@@ -513,5 +532,26 @@ def compute_xi_ref(solution_u_ref, g_ref):
     return xi_ref
 
 
-# def compute_xi_tilde_ref(solution_u, reference_solution):
-#
+def compute_h10_error(solution_u, reference_solution, ref_dg0_space):
+    coarse_space = solution_u.function_space
+    reference_space = reference_solution.function_space
+    reference_mesh = reference_space.mesh
+    ref_solution_u = dfx.fem.Function(reference_space)
+
+    cdim = reference_mesh.topology.dim
+    num_reference_cells = reference_mesh.topology.index_map(cdim).size_global
+    reference_cells = np.arange(num_reference_cells)
+    nmm_coarse2ref = dfx.fem.create_interpolation_data(
+        reference_space, coarse_space, reference_cells, padding=1.0e-14
+    )
+
+    ref_solution_u.interpolate_nonmatching(solution_u, reference_cells, nmm_coarse2ref)
+
+    grad_diff = ufl.grad(reference_solution - ref_solution_u)
+    ref_v0 = ufl.TestFunction(ref_dg0_space)
+    h10_norm_diff = ufl.inner(grad_diff, grad_diff) * ref_v0 * ufl.dx
+    h10_norm_form = dfx.fem.form(h10_norm_diff)
+    h10_norm_vec = assemble_vector(h10_norm_form)
+    ref_h10_norm = dfx.fem.Function(ref_dg0_space)
+    ref_h10_norm.x.array[:] = h10_norm_vec.array[:]
+    return ref_h10_norm
