@@ -26,7 +26,7 @@ total_error:
   line: "-."
   color: "#4daf4a"
 l2_p_error:
-  name: "$\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|h_T^{-1}(p - p_h)\\|_{T \\cap \\Omega}$"
+  name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|h_T^{-1}(p - p_h)\\|_{T \\cap \\Omega}^2\\right)^{1/2}$"
   line: "-"
   color: "#984ea3"
 eta_T:

@@ -67,9 +67,12 @@ dirs = [
     meshes_dir,
 ]
 for dir_path in dirs:
-    if not os.path.isdir(dir_path):
-        print(f"{dir_path} directory not found, we create it.")
+    if os.path.isdir(dir_path):
+        shutil.rmtree(dir_path)
         os.mkdir(dir_path)
+    else:
+        os.mkdir(dir_path)
+
 
 sys.path.append(source_dir)
 
@@ -216,10 +219,11 @@ for i in range(iterations_num):
     if dual:
         aux_element = element("DG", cell_name, auxiliary_degree)
         mxd_element = mixed_element([fe_element, aux_element])
-        fe_space = dfx.fem.functionspace(mesh, mxd_element)
+        mixed_space = dfx.fem.functionspace(mesh, mxd_element)
+        fe_space = dfx.fem.functionspace(mesh, fe_element)
         aux_space = dfx.fem.functionspace(mesh, aux_element)
     else:
-        fe_space = dfx.fem.functionspace(mesh, fe_element)
+        mixed_space = dfx.fem.functionspace(mesh, fe_element)
         solution_element = element("Lagrange", cell_name, solution_degree)
         solution_space = dfx.fem.functionspace(mesh, solution_element)
 
@@ -231,9 +235,12 @@ for i in range(iterations_num):
     omega_h_cells = np.union1d(cells_tags.find(1), cells_tags.find(2))
     cdim = mesh.topology.dim
     mesh.topology.create_connectivity(cdim, cdim)
-    active_dofs = dfx.fem.locate_dofs_topological(fe_space, cdim, omega_h_cells)
+    fe_active_dofs = dfx.fem.locate_dofs_topological(fe_space, cdim, omega_h_cells)
+    aux_active_dofs = dfx.fem.locate_dofs_topological(
+        aux_space, cdim, cells_tags.find(2)
+    )
 
-    results["dof"].append(len(active_dofs))
+    results["dof"].append(len(fe_active_dofs) + len(aux_active_dofs))
 
     checkpoint_file = os.path.join(checkpoint_dir, f"checkpoint_{str(i).zfill(2)}.bp")
     adios4dolfinx.write_mesh(checkpoint_file, mesh)
@@ -279,10 +286,10 @@ for i in range(iterations_num):
 
     if dual:
         solution_u, solution_p = phifem_dual_solve(
-            fe_space, fh, gh, phih, measures, coefs
+            mixed_space, fh, gh, phih, measures, coefs
         )
     else:
-        spaces = {"primal": fe_space, "solution": solution_space}
+        spaces = {"primal": mixed_space, "solution": solution_space}
         solution_u, solution_w = phifem_direct_solve(
             spaces, fh, gh, phih, measures, coefs
         )

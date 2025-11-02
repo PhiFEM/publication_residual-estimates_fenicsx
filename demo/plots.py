@@ -120,6 +120,7 @@ def plot_scalar(fct, name, warp_by_scalar=False):
         plotter.view_xy()
         plotter.enable_rubber_band_2d_style()
         plotter.add_legend_scale()
+        plotter.show_grid()
         plotter.export_html(name + ".html")
     else:
         fct_max = np.max(np.abs(fct.x.array))
@@ -140,6 +141,7 @@ def plot_scalar(fct, name, warp_by_scalar=False):
         )
         plotter.add_mesh(warped, show_edges=False, scalar_bar_args=sargs)
         plotter.add_axes()
+        plotter.show_grid()
         plotter.export_html(os.path.join(path, "wbs_" + file_name + ".html"))
 
     plotter.save_graphic(os.path.join(path, file_name + ".svg"))

@@ -93,8 +93,9 @@ results = {
     "eta_E": [],
 }
 
+uniform_it = 4
 if ref:
-    iterations_num += 2
+    iterations_num += uniform_it
 for i in range(iterations_num):
     plot_mesh(
         mesh,
@@ -157,7 +158,7 @@ for i in range(iterations_num):
     df.write_csv(os.path.join(output_dir, "results.csv"))
 
     if ref:
-        last_iteration = iterations_num - 2
+        last_iteration = iterations_num - uniform_it
     else:
         last_iteration = iterations_num
 

@@ -10,7 +10,6 @@ import ufl
 import yaml
 from basix.ufl import element
 from dolfinx.cpp.refinement import RefinementOption
-from dolfinx.fem.petsc import assemble_vector
 from mpi4py import MPI
 
 sys.path.append("../")
@@ -49,10 +48,11 @@ dirs = [
     checkpoint_dir,
     errors_dir,
 ]
-for dir_path in dirs:
-    if not os.path.isdir(dir_path):
-        print(f"{dir_path} directory not found, we create it.")
-        os.mkdir(dir_path)
+if os.path.isdir(errors_dir):
+    os.rmdir(errors_dir)
+    os.mkdir(errors_dir)
+else:
+    os.mkdir(errors_dir)
 
 sys.path.append(source_dir)
 
@@ -70,6 +70,8 @@ with open(os.path.join(source_dir, "reference.yaml"), "rb") as f:
     ref_parameters = yaml.safe_load(f)
 
 ref_iterations_num = ref_parameters["iterations_number"] - 1
+ref_degree = ref_parameters["finite_element_degree"]
+
 reference_mesh = adios4dolfinx.read_mesh(
     os.path.join(
         source_dir,
@@ -86,13 +88,14 @@ reference_cells = np.arange(num_reference_cells)
 
 cell_name = reference_mesh.topology.cell_name()
 cg1_element = element("CG", cell_name, fe_degree)
+ref_element = element("Lagrange", cell_name, ref_degree)
 cg2_element = element("CG", cell_name, fe_degree + 1)
 levelset_element = element("Lagrange", cell_name, levelset_degree)
 dg0_element = element("DG", cell_name, 0)
 dg1_element = element("DG", cell_name, auxiliar_degree)
 dg2_element = element("DG", cell_name, 2)
 
-reference_space = dfx.fem.functionspace(reference_mesh, cg2_element)
+reference_space = dfx.fem.functionspace(reference_mesh, ref_element)
 reference_levelset_space = dfx.fem.functionspace(reference_mesh, levelset_element)
 ref_dg0_space = dfx.fem.functionspace(reference_mesh, dg0_element)
 ref_dg1_space = dfx.fem.functionspace(reference_mesh, dg1_element)
@@ -106,11 +109,16 @@ ref_g.interpolate(dirichlet_data)
 
 levelset = generate_levelset(np)
 
-reference_solution = fem_solve(reference_space, ref_f, ref_g)
-
-plot_scalar(
+reference_solution = dfx.fem.Function(reference_space)
+adios4dolfinx.read_function(
+    os.path.join(
+        source_dir,
+        "output_reference",
+        "checkpoints",
+        f"checkpoint_{str(ref_iterations_num).zfill(2)}.bp",
+    ),
     reference_solution,
-    os.path.join(errors_dir, "reference_solution"),
+    name="solution_u",
 )
 
 results = pl.read_csv(os.path.join(output_dir, "results.csv")).to_dict()
@@ -216,37 +224,11 @@ for i in range(iterations_num):
     ref_mesh_indicator.x.array[:] = 1.0
 
     coarse_mesh = solution_u.function_space.mesh
-    cf_mesh_1, parent_cells = dfx.mesh.refine(
-        coarse_mesh, option=RefinementOption.parent_cell
-    )[:2]
-    parent_cells = compute_parent_cells(coarse_mesh, cf_mesh_1, parent_cells)
-    cells_tags_1 = dfx.mesh.transfer_meshtag(cells_tags, cf_mesh_1, parent_cells)
-    cf_mesh_1.topology.create_entities(cdim - 1)
-    cf_mesh = dfx.mesh.refine(cf_mesh_1, option=RefinementOption.parent_cell)[0]
-    parent_cells = compute_parent_cells(cf_mesh_1, cf_mesh, parent_cells)
-    cf_cells_tags = dfx.mesh.transfer_meshtag(cells_tags_1, cf_mesh, parent_cells)
-
-    dx = ufl.Measure("dx", domain=cf_mesh, subdomain_data=cf_cells_tags)
-
-    cf_cg2_space = dfx.fem.functionspace(cf_mesh, cg2_element)
-    cf_dg2_space = dfx.fem.functionspace(cf_mesh, dg2_element)
-    cf_dg0_space = dfx.fem.functionspace(cf_mesh, dg0_element)
-    cf_num_cells = cf_mesh.topology.index_map(cdim).size_global
-    cf_all_cells = np.arange(cf_num_cells)
-    nmm_fe_space2cf_space = dfx.fem.create_interpolation_data(
-        cf_cg2_space, fe_space, cf_all_cells, padding=1.0e-14
-    )
     nmm_levelset_space2ref_levelset_space = dfx.fem.create_interpolation_data(
         reference_levelset_space, levelset_space, reference_cells, padding=1.0e-14
     )
     nmm_dg1_space2ref_dg1_space = dfx.fem.create_interpolation_data(
         ref_dg1_space, dg1_space, reference_cells, padding=1.0e-14
-    )
-    nmm_ref_space2cf_space = dfx.fem.create_interpolation_data(
-        cf_cg2_space, reference_space, cf_all_cells, padding=1.0e-14
-    )
-    nmm_dg0_ref_space2cf_dg0_space = dfx.fem.create_interpolation_data(
-        cf_dg0_space, ref_dg0_space, cf_all_cells, padding=1.0e-14
     )
     ref_solution_p = dfx.fem.Function(ref_dg1_space)
     ref_levelset = dfx.fem.Function(reference_levelset_space)
@@ -270,21 +252,18 @@ for i in range(iterations_num):
         coarse_mesh_h_T, reference_cells, nmm_coarse_dg0_space2ref_dg0_space
     )
 
+    h_t_reference_p = reference_solution - ref_g
+
     plot_scalar(
-        ref_solution_p,
-        os.path.join(errors_dir, f"ref_solution_p_{str(i).zfill(2)}"),
+        ref_solution_p, os.path.join(errors_dir, f"ref_solution_p_{str(i).zfill(2)}")
     )
     plot_scalar(
-        ref_levelset,
-        os.path.join(errors_dir, f"ref_levelset_{str(i).zfill(2)}"),
+        ref_levelset, os.path.join(errors_dir, f"ref_levelset_{str(i).zfill(2)}")
     )
     plot_scalar(
         ref_coarse_mesh_h_T,
         os.path.join(errors_dir, f"ref_coarse_mesh_h_T_{str(i).zfill(2)}"),
     )
-
-    h_t_reference_p = reference_solution - ref_g
-
     p_diff = h_t_reference_p - (ref_solution_p * ref_levelset) / ref_coarse_mesh_h_T
 
     ref_v0 = ufl.TestFunction(ref_dg0_space)
