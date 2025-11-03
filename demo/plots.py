@@ -116,7 +116,7 @@ def plot_scalar(fct, name, warp_by_scalar=False):
         plotter.add_text(
             "Scalar contour field", font_size=14, color="black", position="upper_edge"
         )
-        plotter.add_mesh(grid, show_edges=True, show_scalar_bar=True)
+        plotter.add_mesh(grid, show_edges=False, show_scalar_bar=True)
         plotter.view_xy()
         plotter.enable_rubber_band_2d_style()
         plotter.add_legend_scale()

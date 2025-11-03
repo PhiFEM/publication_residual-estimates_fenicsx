@@ -587,6 +587,42 @@ def compute_h10_error(solution_u, reference_solution, ref_dg0_space, dg0_space):
     return ref_h10_norm, coarse_h10_norm
 
 
+def compute_l2_error_p(
+    dg1_solution_p_2_ref,
+    dg1_ref_solution,
+    dg1_ref_g,
+    dg1_levelset_2_ref,
+    dg1_coarse_h_T_2_ref,
+    ref_cut_indicator,
+    ref_dg0_space,
+):
+    dg1_ref_space = dg1_ref_solution.function_space
+    h_T_reference_p = dfx.fem.Function(dg1_ref_space)
+    h_T_reference_p.x.array[:] = dg1_ref_solution.x.array[:] - dg1_ref_g.x.array[:]
+
+    p_diff = dfx.fem.Function(dg1_ref_space)
+    p_diff.x.array[:] = (
+        h_T_reference_p.x.array[:]
+        - (dg1_solution_p_2_ref.x.array[:] * dg1_levelset_2_ref.x.array[:])
+        / dg1_coarse_h_T_2_ref.x.array[:]
+    )
+
+    ref_v0 = ufl.TestFunction(ref_dg0_space)
+    l2_norm_p_int = (
+        dg1_coarse_h_T_2_ref ** (-2)
+        * ufl.inner(p_diff, p_diff)
+        * ref_cut_indicator
+        * ref_v0
+        * ufl.dx
+    )
+    l2_norm_p_form = dfx.fem.form(l2_norm_p_int)
+    l2_p_err_vec = dfx.fem.assemble_vector(l2_norm_p_form)
+
+    ref_l2_p_err = dfx.fem.Function(ref_dg0_space)
+    ref_l2_p_err.x.array[:] = l2_p_err_vec.array[:]
+    return ref_l2_p_err
+
+
 def compute_source_term_oscillations(fh, ref_f, ref_dg0_space, dg0_space):
     h_T_ref = cell_diameter(ref_dg0_space)
     coarse_space = fh.function_space

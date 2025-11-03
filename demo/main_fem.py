@@ -93,9 +93,10 @@ results = {
     "eta_E": [],
 }
 
-uniform_it = 4
-if ref:
-    iterations_num += uniform_it
+uniform_iterations_num = 3
+adaptive_iterations_num = iterations_num - uniform_iterations_num
+if not ref:
+    iterations_num = adaptive_iterations_num
 for i in range(iterations_num):
     plot_mesh(
         mesh,
@@ -157,12 +158,7 @@ for i in range(iterations_num):
     print(df)
     df.write_csv(os.path.join(output_dir, "results.csv"))
 
-    if ref:
-        last_iteration = iterations_num - uniform_it
-    else:
-        last_iteration = iterations_num
-
-    if i < last_iteration:
+    if i < adaptive_iterations_num:
         # Marking and refinement
         if refinement == "adap":
             facets_indices, cells_indices = marking(est_h, dorfler_param)
