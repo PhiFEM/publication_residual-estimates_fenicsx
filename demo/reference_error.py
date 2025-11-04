@@ -227,14 +227,14 @@ for i in range(iterations_num):
     )
 
     coarse_mesh_h_T = cell_diameter(dg0_space)
-    dg1_coarse_h_T_2_ref = dfx.fem.Function(ref_dg1_space)
-    dg1_coarse_h_T_2_ref.interpolate_nonmatching(
-        coarse_mesh_h_T, reference_cells, nmm_dg02ref_dg1
+    dg0_coarse_h_T_2_ref = dfx.fem.Function(ref_dg0_space)
+    dg0_coarse_h_T_2_ref.interpolate_nonmatching(
+        coarse_mesh_h_T, reference_cells, nmm_dg02ref_dg0
     )
 
     # Compute reference H10 error
     ref_h10_norm, coarse_h10_norm = compute_h10_error(
-        solution_u, reference_solution, ref_dg0_space, dg0_space
+        solution_u_2_ref, reference_solution, ref_dg0_space, dg0_space
     )
 
     if coarse_h10_norm is not None:
@@ -262,12 +262,12 @@ for i in range(iterations_num):
     )
 
     ref_l2_p_err = compute_l2_error_p(
-        dg1_solution_p_2_ref,
-        dg1_ref_solution,
-        dg1_ref_g,
-        dg1_levelset_2_ref,
-        dg1_coarse_h_T_2_ref,
-        dg1_cut_indicator_2_ref,
+        dg1_solution_p_2_ref_dg1,
+        reference_solution,
+        ref_g,
+        coarse_levelset_2_ref,
+        dg0_coarse_h_T_2_ref,
+        dg0_cut_indicator_2_ref,
         ref_dg0_space,
     )
 
@@ -299,7 +299,9 @@ for i in range(iterations_num):
 
     results["dirichlet_data_osc"][i] = np.sqrt(ref_osc_g.x.array.sum())
 
-    xi_ref_h10, xi_ref_l2 = compute_xi_h10_l2(solution_u_2_ref, ref_g, ref_dg0_space)
+    xi_ref_h10, xi_ref_l2 = compute_xi_h10_l2(
+        solution_u_2_ref, ref_g, dg0_coarse_h_T_2_ref, ref_dg0_space
+    )
 
     results["xi_h10"][i] = np.sqrt(xi_ref_h10.x.array.sum())
     results["xi_l2"][i] = np.sqrt(xi_ref_l2.x.array.sum())

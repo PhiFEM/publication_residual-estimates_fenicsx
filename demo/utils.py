@@ -523,7 +523,7 @@ def marking(est_h, dorfler_param):
     return facets_indices, cells_indices
 
 
-def compute_xi_h10_l2(solution_u_ref, g_ref, ref_dg0_space):
+def compute_xi_h10_l2(solution_u_ref, g_ref, coarse_h_T, ref_dg0_space):
     ref_space = solution_u_ref.function_space
     xi_source_term = dfx.fem.Function(ref_space)
     xi_dirichlet_data = dfx.fem.Function(ref_space)
@@ -537,8 +537,7 @@ def compute_xi_h10_l2(solution_u_ref, g_ref, ref_dg0_space):
     xi_ref_h10 = dfx.fem.Function(ref_dg0_space)
     xi_ref_h10.x.array[:] = xi_ref_h10_vec.array[:]
 
-    h_T_ref = cell_diameter(ref_dg0_space)
-    xi_ref_l2_int = h_T_ref ** (-1) * ufl.inner(xi_ref, xi_ref) * ref_v0 * ufl.dx
+    xi_ref_l2_int = coarse_h_T ** (-1) * ufl.inner(xi_ref, xi_ref) * ref_v0 * ufl.dx
     xi_ref_l2_form = dfx.fem.form(xi_ref_l2_int)
     xi_ref_l2_vec = assemble_vector(xi_ref_l2_form)
     xi_ref_l2 = dfx.fem.Function(ref_dg0_space)
@@ -546,23 +545,11 @@ def compute_xi_h10_l2(solution_u_ref, g_ref, ref_dg0_space):
     return xi_ref_h10, xi_ref_l2
 
 
-def compute_h10_error(solution_u, reference_solution, ref_dg0_space, dg0_space):
-    coarse_space = solution_u.function_space
-    coarse_mesh = coarse_space.mesh
+def compute_h10_error(solution_u_2_ref, reference_solution, ref_dg0_space, dg0_space):
     reference_space = reference_solution.function_space
-    reference_mesh = reference_space.mesh
-    ref_solution_u = dfx.fem.Function(reference_space)
+    solution_u_2_ref = dfx.fem.Function(reference_space)
 
-    cdim = reference_mesh.topology.dim
-    num_reference_cells = reference_mesh.topology.index_map(cdim).size_global
-    reference_cells = np.arange(num_reference_cells)
-    nmm_coarse2ref = dfx.fem.create_interpolation_data(
-        reference_space, coarse_space, reference_cells, padding=1.0e-14
-    )
-
-    ref_solution_u.interpolate_nonmatching(solution_u, reference_cells, nmm_coarse2ref)
-
-    grad_diff = ufl.grad(reference_solution - ref_solution_u)
+    grad_diff = ufl.grad(reference_solution - solution_u_2_ref)
     ref_v0 = ufl.TestFunction(ref_dg0_space)
     h10_norm_diff = ufl.inner(grad_diff, grad_diff) * ref_v0 * ufl.dx
     h10_norm_form = dfx.fem.form(h10_norm_diff)
@@ -572,6 +559,8 @@ def compute_h10_error(solution_u, reference_solution, ref_dg0_space, dg0_space):
 
     coarse_h10_norm = None
     try:
+        coarse_mesh = dg0_space.mesh
+        cdim = coarse_mesh.geometry.dim
         num_cells = coarse_mesh.topology.index_map(cdim).size_global
         all_cells = np.arange(num_cells)
         nmm_ref_space2coarse_space = dfx.fem.create_interpolation_data(
@@ -588,12 +577,12 @@ def compute_h10_error(solution_u, reference_solution, ref_dg0_space, dg0_space):
 
 
 def compute_l2_error_p(
-    dg1_solution_p_2_ref,
-    dg1_ref_solution,
-    dg1_ref_g,
-    dg1_levelset_2_ref,
-    dg1_coarse_h_T_2_ref,
-    ref_cut_indicator,
+    coarse_solution_p_2_ref,
+    ref_solution,
+    ref_g,
+    coarse_levelset_2_ref,
+    coarse_h_T_2_ref,
+    coarse_cut_indicator_2_ref,
     ref_dg0_space,
 ):
     ref_space = ref_solution.function_space
@@ -602,12 +591,12 @@ def compute_l2_error_p(
 
     p_diff = (
         h_T_reference_p
-        - coarse_solution_p_2_ref * coarse_levelset_2_ref * inv_coarse_h_T_2_ref
+        - coarse_solution_p_2_ref * coarse_levelset_2_ref / coarse_h_T_2_ref
     )
 
     ref_v0 = ufl.TestFunction(ref_dg0_space)
     l2_norm_p_int = (
-        dg1_coarse_h_T_2_ref ** (-2)
+        coarse_h_T_2_ref ** (-2)
         * ufl.inner(p_diff, p_diff)
         * coarse_cut_indicator_2_ref
         * ref_v0
