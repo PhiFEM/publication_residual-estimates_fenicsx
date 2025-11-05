@@ -3,6 +3,7 @@ import os
 import dolfinx as dfx
 import numpy as np
 import pyvista as pv
+from dolfinx.io import XDMFFile
 from matplotlib.colors import ListedColormap
 
 
@@ -88,6 +89,9 @@ def plot_mesh(mesh, name, wireframe=False, linewidth=1.0):
     plotter.save_graphic(name + ".svg")
 
     plotter.close()
+
+    with XDMFFile(mesh.comm, name + ".xdmf", "w") as of:
+        of.write_mesh(mesh)
 
 
 def plot_scalar(fct, name, warp_by_scalar=False):
