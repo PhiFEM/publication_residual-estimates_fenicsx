@@ -545,12 +545,13 @@ def compute_xi_h10_l2(solution_u_ref, g_ref, coarse_h_T, ref_dg0_space):
 
 
 def compute_h10_error(solution_u_2_ref, reference_solution, ref_dg0_space, dg0_space):
-    reference_space = reference_solution.function_space
-    solution_u_2_ref = dfx.fem.Function(reference_space)
-
     grad_diff = ufl.grad(reference_solution - solution_u_2_ref)
     ref_v0 = ufl.TestFunction(ref_dg0_space)
-    h10_norm_diff = ufl.inner(grad_diff, grad_diff) * ref_v0 * ufl.dx
+    h10_norm_diff = (
+        ufl.inner(grad_diff, grad_diff)
+        * ref_v0
+        * ufl.dx(metadata={"quadrature_degree": 20})
+    )
     h10_norm_form = dfx.fem.form(h10_norm_diff)
     h10_norm_vec = assemble_vector(h10_norm_form)
     ref_h10_norm = dfx.fem.Function(ref_dg0_space)
@@ -597,7 +598,7 @@ def compute_l2_error_p(
         * ufl.inner(p_diff, p_diff)
         * coarse_cut_indicator_2_ref
         * ref_v0
-        * ufl.dx
+        * ufl.dx(metadata={"quadrature_degree": 20})
     )
     l2_norm_p_form = dfx.fem.form(l2_norm_p_int)
     l2_p_err_vec = dfx.fem.assemble_vector(l2_norm_p_form)

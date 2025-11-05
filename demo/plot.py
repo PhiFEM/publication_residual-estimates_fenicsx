@@ -44,7 +44,7 @@ for parameter in parameters_list:
     if ref_type == "unif":
         trunc = -3
     elif ref_type == "adap":
-        trunc = -6
+        trunc = -10
     data_path = os.path.join(
         demo,
         "output_" + param_name,

@@ -32,9 +32,15 @@ parser = argparse.ArgumentParser(
 )
 
 parser.add_argument("parameters", type=str, help="Choose the demo/parameters to run.")
+parser.add_argument(
+    "--compute_xi_ref",
+    action="store_true",
+    help="Choose if an higher order approximation to xi is computed.",
+)
 
 args = parser.parse_args()
 demo, parameters_name = args.parameters.split(sep="/")
+compute_xi_ref = args.compute_xi_ref
 
 source_dir = os.path.join(parent_dir, demo)
 output_dir = os.path.join(source_dir, "output_" + parameters_name)
