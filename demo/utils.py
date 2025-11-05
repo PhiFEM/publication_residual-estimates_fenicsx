@@ -529,7 +529,6 @@ def compute_xi_h10_l2(solution_u_ref, g_ref, coarse_h_T, ref_dg0_space):
     xi_dirichlet_data = dfx.fem.Function(ref_space)
     xi_dirichlet_data.x.array[:] = solution_u_ref.x.array[:] - g_ref.x.array[:]
     xi_ref = fem_solve(solution_u_ref.function_space, xi_source_term, xi_dirichlet_data)
-
     ref_v0 = ufl.TestFunction(ref_dg0_space)
     xi_ref_h10_int = ufl.inner(ufl.grad(xi_ref), ufl.grad(xi_ref)) * ref_v0 * ufl.dx
     xi_ref_h10_form = dfx.fem.form(xi_ref_h10_int)
@@ -585,8 +584,6 @@ def compute_l2_error_p(
     coarse_cut_indicator_2_ref,
     ref_dg0_space,
 ):
-    ref_space = ref_solution.function_space
-    h_T_reference_p = dfx.fem.Function(ref_space)
     h_T_reference_p = ref_solution - ref_g
 
     p_diff = (
@@ -610,25 +607,32 @@ def compute_l2_error_p(
     return ref_l2_p_err
 
 
-def compute_source_term_oscillations(fh, ref_f, coarse_h_T, ref_dg0_space, dg0_space):
-    coarse_space = fh.function_space
+def compute_source_term_oscillations(
+    fh, ref_f, coarse_h_T, ref_dg0_space, dg0_space, coarse_space, reference_space
+):
     coarse_mesh = coarse_space.mesh
-    reference_space = ref_f.function_space
     reference_mesh = reference_space.mesh
     ref_fh = dfx.fem.Function(reference_space)
 
     cdim = reference_mesh.topology.dim
     num_reference_cells = reference_mesh.topology.index_map(cdim).size_global
     reference_cells = np.arange(num_reference_cells)
-    nmm_coarse2ref = dfx.fem.create_interpolation_data(
-        reference_space, coarse_space, reference_cells, padding=1.0e-14
-    )
+    try:
+        nmm_coarse2ref = dfx.fem.create_interpolation_data(
+            reference_space, coarse_space, reference_cells, padding=1.0e-14
+        )
 
-    ref_fh.interpolate_nonmatching(fh, reference_cells, nmm_coarse2ref)
-
+        ref_fh.interpolate_nonmatching(fh, reference_cells, nmm_coarse2ref)
+    except AttributeError:
+        ref_fh = fh
     diff = ref_f - ref_fh
     ref_v0 = ufl.TestFunction(ref_dg0_space)
-    st_osc_norm_diff = coarse_h_T**2 * ufl.inner(diff, diff) * ref_v0 * ufl.dx
+    st_osc_norm_diff = (
+        coarse_h_T**2
+        * ufl.inner(diff, diff)
+        * ref_v0
+        * ufl.dx(domain=reference_mesh.ufl_domain())
+    )
     st_osc_norm_form = dfx.fem.form(st_osc_norm_diff)
     st_osc_norm_vec = assemble_vector(st_osc_norm_form)
     ref_st_osc_norm = dfx.fem.Function(ref_dg0_space)
@@ -652,11 +656,15 @@ def compute_source_term_oscillations(fh, ref_f, coarse_h_T, ref_dg0_space, dg0_s
 
 
 def compute_dirichlet_oscillations(
-    gh, ref_g, ref_dg0_space, dg0_space, ref_cut_indicator
+    gh,
+    ref_g,
+    ref_dg0_space,
+    dg0_space,
+    ref_cut_indicator,
+    coarse_space,
+    reference_space,
 ):
-    coarse_space = gh.function_space
     coarse_mesh = coarse_space.mesh
-    reference_space = ref_g.function_space
     reference_mesh = reference_space.mesh
     ref_gh = dfx.fem.Function(reference_space)
 

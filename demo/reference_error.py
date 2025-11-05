@@ -7,6 +7,7 @@ import adios4dolfinx
 import dolfinx as dfx
 import numpy as np
 import polars as pl
+import ufl
 import yaml
 from basix.ufl import element
 from mpi4py import MPI
@@ -54,15 +55,27 @@ else:
 
 sys.path.append(source_dir)
 
-from data import generate_dirichlet_data, generate_levelset, generate_source_term
+from data import generate_levelset
+
+exact_solution_available = False
+try:
+    from data import generate_exact_solution
+
+    exact_solution_available = True
+except ImportError:
+    pass
+
+if not exact_solution_available:
+    from data import generate_dirichlet_data, generate_source_term
 
 with open(os.path.join(source_dir, parameters_name + ".yaml"), "rb") as f:
     parameters = yaml.safe_load(f)
 
 iterations_num = parameters["iterations_number"]
 fe_degree = parameters["finite_element_degree"]
-auxiliary_degree = parameters["auxiliary_degree"]
-levelset_degree = parameters["levelset_degree"]
+phifem = "phifem" in parameters_name
+if phifem:
+    levelset_degree = parameters["levelset_degree"]
 
 with open(os.path.join(source_dir, "reference.yaml"), "rb") as f:
     ref_parameters = yaml.safe_load(f)
@@ -88,38 +101,49 @@ cell_name = reference_mesh.topology.cell_name()
 # Define finite elements and reference FE spaces
 cg1_element = element("Lagrange", cell_name, fe_degree)
 ref_element = element("Lagrange", cell_name, ref_degree)
-levelset_element = element("Lagrange", cell_name, levelset_degree)
-levelset_element = element("Lagrange", cell_name, levelset_degree)
+ref_dg1_element = element("DG", cell_name, ref_degree)
+if phifem:
+    levelset_element = element("Lagrange", cell_name, levelset_degree)
+    reference_levelset_space = dfx.fem.functionspace(reference_mesh, levelset_element)
 dg0_element = element("DG", cell_name, 0)
-dg1_element = element("DG", cell_name, auxiliary_degree)
+dg1_element = element("DG", cell_name, 1)
 
 reference_space = dfx.fem.functionspace(reference_mesh, ref_element)
-reference_levelset_space = dfx.fem.functionspace(reference_mesh, levelset_element)
 ref_dg0_space = dfx.fem.functionspace(reference_mesh, dg0_element)
-ref_dg1_space = dfx.fem.functionspace(reference_mesh, dg1_element)
+ref_dg1_space = dfx.fem.functionspace(reference_mesh, ref_dg1_element)
+
 
 # Load reference source terms
-source_term = generate_source_term(np)
-ref_f = dfx.fem.Function(reference_space)
-ref_f.interpolate(source_term)
-dirichlet_data = generate_dirichlet_data(np)
+if not exact_solution_available:
+    source_term = generate_source_term(np)
+    ref_f = dfx.fem.Function(reference_space)
+    ref_f.interpolate(source_term)
+    dirichlet_data = generate_dirichlet_data(np)
+
+    # Load reference solution
+    reference_solution = dfx.fem.Function(reference_space)
+    adios4dolfinx.read_function(
+        os.path.join(
+            source_dir,
+            "output_reference",
+            "checkpoints",
+            f"checkpoint_{str(ref_max_iteration).zfill(2)}.bp",
+        ),
+        reference_solution,
+        name="solution_u",
+    )
+else:
+    ref_solution = generate_exact_solution(ufl)
+    ref_x = ufl.SpatialCoordinate(reference_mesh)
+    reference_solution = ref_solution(ref_x)
+    ref_f = -ufl.div(ufl.grad(reference_solution))
+    dirichlet_data = generate_exact_solution(np)
+
 ref_g = dfx.fem.Function(reference_space)
 ref_g.interpolate(dirichlet_data)
 
 levelset = generate_levelset(np)
 
-# Load reference solution
-reference_solution = dfx.fem.Function(reference_space)
-adios4dolfinx.read_function(
-    os.path.join(
-        source_dir,
-        "output_reference",
-        "checkpoints",
-        f"checkpoint_{str(ref_max_iteration).zfill(2)}.bp",
-    ),
-    reference_solution,
-    name="solution_u",
-)
 
 # Allocate memory for results
 results = pl.read_csv(os.path.join(output_dir, "results.csv")).to_dict()
@@ -142,12 +166,14 @@ for i in range(iterations_num):
         comm=MPI.COMM_WORLD,
     )
     fe_space = dfx.fem.functionspace(mesh, cg1_element)
-    levelset_space = dfx.fem.functionspace(mesh, levelset_element)
+
+    if phifem:
+        levelset_space = dfx.fem.functionspace(mesh, levelset_element)
+        fe_levelset = dfx.fem.Function(levelset_space)
     dg1_space = dfx.fem.functionspace(mesh, dg1_element)
     dg0_space = dfx.fem.functionspace(mesh, dg0_element)
     solution_u = dfx.fem.Function(fe_space)
     solution_p = dfx.fem.Function(dg1_space)
-    fe_levelset = dfx.fem.Function(levelset_space)
 
     adios4dolfinx.read_function(
         os.path.join(
@@ -157,7 +183,10 @@ for i in range(iterations_num):
         solution_u,
         name="solution_u",
     )
-    if "phifem" in parameters_name:
+    nmm_fe2ref = dfx.fem.create_interpolation_data(
+        reference_space, fe_space, reference_cells, padding=1.0e-14
+    )
+    if phifem:
         adios4dolfinx.read_function(
             os.path.join(
                 checkpoint_dir,
@@ -186,51 +215,47 @@ for i in range(iterations_num):
         cut_indicator = dfx.fem.Function(dg0_space)
         cut_indicator.x.array[cells_tags.find(2)] = 1.0
 
-    # Compute NMM interpolation data between coarse spaces and ref spaces
-    nmm_fe2ref = dfx.fem.create_interpolation_data(
-        reference_space, fe_space, reference_cells, padding=1.0e-14
-    )
-    nmm_dg12ref_dg1 = dfx.fem.create_interpolation_data(
-        ref_dg1_space, dg1_space, reference_cells, padding=1.0e-14
-    )
-    nmm_dg02ref_dg0 = dfx.fem.create_interpolation_data(
-        ref_dg0_space, dg0_space, reference_cells, padding=1.0e-14
-    )
-    nmm_dg02ref_dg1 = dfx.fem.create_interpolation_data(
-        ref_dg1_space, dg0_space, reference_cells, padding=1.0e-14
-    )
-    nmm_levelset2ref_levelset = dfx.fem.create_interpolation_data(
-        reference_levelset_space, levelset_space, reference_cells, padding=1.0e-14
-    )
+        nmm_levelset2ref_levelset = dfx.fem.create_interpolation_data(
+            reference_levelset_space, levelset_space, reference_cells, padding=1.0e-14
+        )
+        # Compute NMM interpolation data between coarse spaces and ref spaces
+        nmm_dg12ref_dg1 = dfx.fem.create_interpolation_data(
+            ref_dg1_space, dg1_space, reference_cells, padding=1.0e-14
+        )
+        nmm_dg02ref_dg0 = dfx.fem.create_interpolation_data(
+            ref_dg0_space, dg0_space, reference_cells, padding=1.0e-14
+        )
+        nmm_dg02ref_dg1 = dfx.fem.create_interpolation_data(
+            ref_dg1_space, dg0_space, reference_cells, padding=1.0e-14
+        )
+        dg0_cut_indicator_2_ref = dfx.fem.Function(ref_dg0_space)
+        dg0_cut_indicator_2_ref.interpolate_nonmatching(
+            cut_indicator, reference_cells, nmm_dg02ref_dg0
+        )
+        dg0_cut_indicator_2_ref = dfx.fem.Function(ref_dg0_space)
+        dg0_cut_indicator_2_ref.interpolate_nonmatching(
+            cut_indicator, reference_cells, nmm_dg02ref_dg0
+        )
+
+        dg1_solution_p_2_ref_dg1 = dfx.fem.Function(ref_dg1_space)
+        dg1_solution_p_2_ref_dg1.interpolate_nonmatching(
+            solution_p, reference_cells, nmm_dg12ref_dg1
+        )
+
+        coarse_levelset_2_ref = dfx.fem.Function(reference_levelset_space)
+        coarse_levelset_2_ref.interpolate_nonmatching(
+            fe_levelset, reference_cells, nmm_levelset2ref_levelset
+        )
+
+        coarse_mesh_h_T = cell_diameter(dg0_space)
+        dg0_coarse_h_T_2_ref = dfx.fem.Function(ref_dg0_space)
+        dg0_coarse_h_T_2_ref.interpolate_nonmatching(
+            coarse_mesh_h_T, reference_cells, nmm_dg02ref_dg0
+        )
 
     # Interpolate coarse functions to ref spaces
     solution_u_2_ref = dfx.fem.Function(reference_space)
     solution_u_2_ref.interpolate_nonmatching(solution_u, reference_cells, nmm_fe2ref)
-
-    dg0_cut_indicator_2_ref = dfx.fem.Function(ref_dg0_space)
-    dg0_cut_indicator_2_ref.interpolate_nonmatching(
-        cut_indicator, reference_cells, nmm_dg02ref_dg0
-    )
-    dg0_cut_indicator_2_ref = dfx.fem.Function(ref_dg0_space)
-    dg0_cut_indicator_2_ref.interpolate_nonmatching(
-        cut_indicator, reference_cells, nmm_dg02ref_dg0
-    )
-
-    dg1_solution_p_2_ref_dg1 = dfx.fem.Function(ref_dg1_space)
-    dg1_solution_p_2_ref_dg1.interpolate_nonmatching(
-        solution_p, reference_cells, nmm_dg12ref_dg1
-    )
-
-    coarse_levelset_2_ref = dfx.fem.Function(reference_levelset_space)
-    coarse_levelset_2_ref.interpolate_nonmatching(
-        fe_levelset, reference_cells, nmm_levelset2ref_levelset
-    )
-
-    coarse_mesh_h_T = cell_diameter(dg0_space)
-    dg0_coarse_h_T_2_ref = dfx.fem.Function(ref_dg0_space)
-    dg0_coarse_h_T_2_ref.interpolate_nonmatching(
-        coarse_mesh_h_T, reference_cells, nmm_dg02ref_dg0
-    )
 
     # Compute reference H10 error
     ref_h10_norm, coarse_h10_norm = compute_h10_error(
@@ -245,43 +270,62 @@ for i in range(iterations_num):
     h10_err_sqd = ref_h10_norm.x.array.sum()
     results["error"][i] = np.sqrt(h10_err_sqd)
 
-    # Compute L2 error for p
-    h_t_reference_p = reference_solution - ref_g
+    if phifem:
+        plot_scalar(
+            dg1_solution_p_2_ref_dg1,
+            os.path.join(errors_dir, f"ref_solution_p_{str(i).zfill(2)}"),
+        )
+        plot_scalar(
+            coarse_levelset_2_ref,
+            os.path.join(errors_dir, f"ref_levelset_{str(i).zfill(2)}"),
+        )
+        plot_scalar(
+            dg0_coarse_h_T_2_ref,
+            os.path.join(errors_dir, f"ref_coarse_mesh_h_T_{str(i).zfill(2)}"),
+        )
 
-    plot_scalar(
-        dg1_solution_p_2_ref_dg1,
-        os.path.join(errors_dir, f"ref_solution_p_{str(i).zfill(2)}"),
-    )
-    plot_scalar(
-        coarse_levelset_2_ref,
-        os.path.join(errors_dir, f"ref_levelset_{str(i).zfill(2)}"),
-    )
-    plot_scalar(
-        dg0_coarse_h_T_2_ref,
-        os.path.join(errors_dir, f"ref_coarse_mesh_h_T_{str(i).zfill(2)}"),
-    )
+        ref_l2_p_err = compute_l2_error_p(
+            dg1_solution_p_2_ref_dg1,
+            reference_solution,
+            ref_g,
+            coarse_levelset_2_ref,
+            dg0_coarse_h_T_2_ref,
+            dg0_cut_indicator_2_ref,
+            ref_dg0_space,
+        )
 
-    ref_l2_p_err = compute_l2_error_p(
-        dg1_solution_p_2_ref_dg1,
-        reference_solution,
-        ref_g,
-        coarse_levelset_2_ref,
-        dg0_coarse_h_T_2_ref,
-        dg0_cut_indicator_2_ref,
-        ref_dg0_space,
-    )
+        plot_scalar(
+            ref_l2_p_err, os.path.join(errors_dir, f"l2_p_err_{str(i).zfill(2)}")
+        )
+        l2_p_err_sqd = ref_l2_p_err.x.array.sum()
 
-    plot_scalar(ref_l2_p_err, os.path.join(errors_dir, f"l2_p_err_{str(i).zfill(2)}"))
-    l2_p_err_sqd = ref_l2_p_err.x.array.sum()
-
-    results["l2_p_error"][i] = np.sqrt(l2_p_err_sqd)
+        results["l2_p_error"][i] = np.sqrt(l2_p_err_sqd)
 
     # Source term oscillations estimation
-    fh = dfx.fem.Function(fe_space)
-    fh.interpolate(source_term)
+    # Dirichlet data oscillations estimation
+    if exact_solution_available:
+        x = ufl.SpatialCoordinate(mesh)
+        coarse_ref_solution = ref_solution(x)
+        fh = -ufl.div(ufl.grad(coarse_ref_solution))
+        gh = coarse_ref_solution
+        dirichlet_data = generate_exact_solution(np)
+    else:
+        fh = dfx.fem.Function(fe_space)
+        fh.interpolate(source_term)
+        dirichlet_data = generate_dirichlet_data(np)
 
+    gh = dfx.fem.Function(fe_space)
+    gh.interpolate(dirichlet_data)
+
+    """
     ref_osc_f, coarse_osc_f = compute_source_term_oscillations(
-        fh, ref_f, dg0_coarse_h_T_2_ref, ref_dg0_space, dg0_space
+        fh,
+        ref_f,
+        dg0_coarse_h_T_2_ref,
+        ref_dg0_space,
+        dg0_space,
+        fe_space,
+        reference_space,
     )
 
     plot_scalar(
@@ -289,32 +333,47 @@ for i in range(iterations_num):
     )
     results["source_term_osc"][i] = np.sqrt(ref_osc_f.x.array.sum())
 
-    # Dirichlet data oscillations estimation
-    gh = dfx.fem.Function(fe_space)
-    gh.interpolate(dirichlet_data)
-
     ref_osc_g, coarse_osc_g = compute_dirichlet_oscillations(
-        gh, ref_g, ref_dg0_space, dg0_space, dg0_cut_indicator_2_ref
+        gh,
+        ref_g,
+        ref_dg0_space,
+        dg0_space,
+        dg0_cut_indicator_2_ref,
+        fe_space,
+        reference_space,
     )
 
     results["dirichlet_data_osc"][i] = np.sqrt(ref_osc_g.x.array.sum())
+    """
 
-    xi_ref_h10, xi_ref_l2 = compute_xi_h10_l2(
-        solution_u_2_ref, ref_g, dg0_coarse_h_T_2_ref, ref_dg0_space
-    )
+    if phifem:
+        if compute_xi_ref:
+            xi_ref_h10, xi_ref_l2 = compute_xi_h10_l2(
+                solution_u_2_ref, ref_g, dg0_coarse_h_T_2_ref, ref_dg0_space
+            )
 
-    results["xi_h10"][i] = np.sqrt(xi_ref_h10.x.array.sum())
-    results["xi_l2"][i] = np.sqrt(xi_ref_l2.x.array.sum())
-
-    results["triple_norm_error"][i] = np.sqrt(h10_err_sqd + l2_p_err_sqd)
-    results["total_error"][i] = np.sqrt(
-        h10_err_sqd
-        + l2_p_err_sqd
-        + ref_osc_f.x.array.sum()
-        + ref_osc_g.x.array.sum()
-        + xi_ref_h10.x.array.sum()
-        + xi_ref_l2.x.array.sum()
-    )
+            results["xi_h10"][i] = np.sqrt(xi_ref_h10.x.array.sum())
+            results["xi_l2"][i] = np.sqrt(xi_ref_l2.x.array.sum())
+        else:
+            xi_ref_h10 = dfx.fem.Function(ref_dg0_space)
+            xi_ref_l2 = dfx.fem.Function(ref_dg0_space)
+        results["triple_norm_error"][i] = np.sqrt(h10_err_sqd + l2_p_err_sqd)
+        # results["total_error"][i] = np.sqrt(
+        #     h10_err_sqd
+        #     + l2_p_err_sqd
+        #     + ref_osc_f.x.array.sum()
+        #     + ref_osc_g.x.array.sum()
+        #     + xi_ref_h10.x.array.sum()
+        #     + xi_ref_l2.x.array.sum()
+        # )
+        results["total_error"][i] = np.sqrt(
+            h10_err_sqd
+            + l2_p_err_sqd
+            + xi_ref_h10.x.array.sum()
+            + xi_ref_l2.x.array.sum()
+        )
+    else:
+        results["total_error"][i] = results["error"][i]
 
     df = pl.DataFrame(results)
     print(df)

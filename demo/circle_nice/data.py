@@ -1,7 +1,5 @@
-import gmsh
 import ngsPETSc.utils.fenicsx as ngfx
 import numpy as np
-import ufl
 from mpi4py import MPI
 from netgen.geom2d import SplineGeometry
 
@@ -13,18 +11,18 @@ def generate_levelset(mode):
     return levelset
 
 
-def generate_source_term(mode):
-    def source_term(x):
-        return np.zeros_like(x[0])
-
-    return source_term
-
-
 def generate_dirichlet_data(mode):
     def dirichlet_data(x):
         return mode.exp(-((x[0] - 1.0) ** 2 + x[1] ** 2) * 10.0)
 
     return dirichlet_data
+
+
+def generate_exact_solution(mode):
+    def exact_solution(x):
+        return mode.exp(-((x[0] - 1.0) ** 2 + x[1] ** 2) * 10.0)
+
+    return exact_solution
 
 
 def gen_mesh(hmax, curved=False):

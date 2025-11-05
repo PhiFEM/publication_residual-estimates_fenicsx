@@ -76,7 +76,18 @@ for dir_path in dirs:
 
 sys.path.append(source_dir)
 
-from data import generate_dirichlet_data, generate_levelset, generate_source_term
+from data import generate_levelset
+
+exact_solution_available = False
+try:
+    from data import generate_exact_solution
+
+    exact_solution_available = True
+except ImportError:
+    pass
+
+if not exact_solution_available:
+    from data import generate_dirichlet_data, generate_source_term
 
 try:
     from data import generate_detection_levelset
@@ -265,24 +276,31 @@ for i in range(iterations_num):
     )
 
     u_space = dfx.fem.functionspace(mesh, fe_element)
-    source_term = generate_source_term(np)
-    dirichlet_data = generate_dirichlet_data(np)
-    fh = dfx.fem.Function(u_space)
-    fh.interpolate(source_term)
-    gh = dfx.fem.Function(u_space)
-    gh.interpolate(dirichlet_data)
-    plot_scalar(fh, os.path.join(data_dir, f"source_term_{str(i).zfill(2)}"))
-    plot_scalar(gh, os.path.join(data_dir, f"dirichlet_data_{str(i).zfill(2)}"))
-    plot_scalar(
-        fh,
-        os.path.join(data_dir, f"source_term_{str(i).zfill(2)}"),
-        warp_by_scalar=True,
-    )
-    plot_scalar(
-        gh,
-        os.path.join(data_dir, f"dirichlet_data_{str(i).zfill(2)}"),
-        warp_by_scalar=True,
-    )
+
+    if not exact_solution_available:
+        source_term = generate_source_term(np)
+        dirichlet_data = generate_dirichlet_data(np)
+        fh = dfx.fem.Function(u_space)
+        fh.interpolate(source_term)
+        gh = dfx.fem.Function(u_space)
+        gh.interpolate(dirichlet_data)
+        plot_scalar(fh, os.path.join(data_dir, f"source_term_{str(i).zfill(2)}"))
+        plot_scalar(gh, os.path.join(data_dir, f"dirichlet_data_{str(i).zfill(2)}"))
+        plot_scalar(
+            fh,
+            os.path.join(data_dir, f"source_term_{str(i).zfill(2)}"),
+            warp_by_scalar=True,
+        )
+        plot_scalar(
+            gh,
+            os.path.join(data_dir, f"dirichlet_data_{str(i).zfill(2)}"),
+            warp_by_scalar=True,
+        )
+    else:
+        x = ufl.SpatialCoordinate(mesh)
+        exact_solution = generate_exact_solution(ufl)(x)
+        fh = -ufl.div(ufl.grad(exact_solution))
+        gh = exact_solution
 
     if dual:
         solution_u, solution_p = phifem_dual_solve(

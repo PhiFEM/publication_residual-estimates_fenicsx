@@ -63,7 +63,22 @@ for dir_path in dirs:
 
 sys.path.append(source_dir)
 
-from data import gen_mesh, generate_dirichlet_data, generate_source_term
+from data import gen_mesh
+
+exact_solution_available = False
+try:
+    from data import generate_exact_solution
+
+    exact_solution_available = True
+    exact_sol = generate_exact_solution(ufl)
+except ImportError:
+    pass
+
+if not exact_solution_available:
+    from data import generate_dirichlet_data, generate_source_term
+
+    source_term = generate_source_term(np)
+    dirichlet_data = generate_dirichlet_data(np)
 
 with open(os.path.join(source_dir, parameters + ".yaml"), "rb") as f:
     parameters = yaml.safe_load(f)
@@ -93,10 +108,6 @@ results = {
     "eta_E": [],
 }
 
-uniform_iterations_num = 3
-adaptive_iterations_num = iterations_num - uniform_iterations_num
-if not ref:
-    iterations_num = adaptive_iterations_num
 for i in range(iterations_num):
     plot_mesh(
         mesh,
@@ -115,10 +126,15 @@ for i in range(iterations_num):
     results["dof"].append(len(active_dofs))
     dg0_space = dfx.fem.functionspace(mesh, dg0_element)
 
-    source_term = generate_source_term(np)
-    dirichlet_data = generate_dirichlet_data(np)
-    fh = dfx.fem.Function(fe_space)
-    fh.interpolate(source_term)
+    if exact_solution_available:
+        x = ufl.SpatialCoordinate(mesh)
+        exact_solution = exact_sol(x)
+        fh = -ufl.div(ufl.grad(exact_solution))
+        dirichlet_data = generate_exact_solution(np)
+    else:
+        fh = dfx.fem.Function(fe_space)
+        fh.interpolate(source_term)
+        dirichlet_data = generate_dirichlet_data(np)
     gh = dfx.fem.Function(fe_space)
     gh.interpolate(dirichlet_data)
 
@@ -158,19 +174,14 @@ for i in range(iterations_num):
     print(df)
     df.write_csv(os.path.join(output_dir, "results.csv"))
 
-    if i < adaptive_iterations_num:
-        # Marking and refinement
-        if refinement == "adap":
-            facets_indices, cells_indices = marking(est_h, dorfler_param)
-            mesh = geoModel.refineMarkedElements(tdim, cells_indices)[0]
-            if curved:
-                mesh = geoModel.curveField(3)
-        elif refinement == "unif":
-            mesh = geoModel.refineMarkedElements(tdim, all_cells)[0]
-            if curved:
-                mesh = geoModel.curveField(3)
+    uniform_ref = refinement == "unif" or ref and i > iterations_num - 3
+    # Marking and refinement
+    if uniform_ref:
+        mesh = geoModel.refineMarkedElements(tdim, all_cells)[0]
+        if curved:
+            mesh = geoModel.curveField(3)
     else:
-        if ref:
-            mesh = geoModel.refineMarkedElements(tdim, all_cells)[0]
-            if curved:
-                mesh = geoModel.curveField(3)
+        facets_indices, cells_indices = marking(est_h, dorfler_param)
+        mesh = geoModel.refineMarkedElements(tdim, cells_indices)[0]
+        if curved:
+            mesh = geoModel.curveField(3)
