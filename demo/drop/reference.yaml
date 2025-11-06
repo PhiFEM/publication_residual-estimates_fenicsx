@@ -1,6 +1,6 @@
 # Drop test case
 initial_mesh_size: 0.5
-iterations_number: 15
+iterations_number: 35
 refinement: "adap"
 mesh_type: "sub"
 finite_element_degree: 2

@@ -1,6 +1,6 @@
 # Oursin test case
-initial_mesh_size: 0.5
-iterations_number: 28
+initial_mesh_size: 0.1
+iterations_number: 32
 refinement: "adap"
 mesh_type: "sub"
 finite_element_degree: 1
