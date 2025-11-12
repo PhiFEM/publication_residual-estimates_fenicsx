@@ -41,10 +41,11 @@ for parameter in parameters_list:
     ref_type = parameters["refinement"]
     mesh_type = parameters["mesh_type"]
     scheme_name = plot_param[param_name]["name"]
+    trunc_top = -5
     if ref_type == "unif":
-        trunc = -3
+        trunc_btm = trunc_top - 3
     elif ref_type == "adap":
-        trunc = -8
+        trunc_btm = trunc_top - 8
     data_path = os.path.join(
         demo,
         "output_" + param_name,
@@ -65,19 +66,22 @@ for parameter in parameters_list:
         mask = np.isnan(ys)
         xs = xs[~mask]
         ys = ys[~mask]
-        ys_not_zero = np.max(ys) > 0.0
+        try:
+            ys_not_zero = np.max(ys) > 0.0
+        except ValueError:
+            ys_not_zero = False
         if ys_not_zero:
             slope, b = np.polyfit(
-                np.log(xs[trunc:]),
-                np.log(ys[trunc:]),
+                np.log(xs[trunc_btm:trunc_top]),
+                np.log(ys[trunc_btm:trunc_top]),
                 1,
             )
         else:
             continue
         if ys_not_zero:
             plt.loglog(
-                xs,
-                ys,
+                xs[:trunc_top],
+                ys[:trunc_top],
                 lstyle + mstyle,
                 c=color,
                 label=rf"{d_name} ({scheme_name}; {np.round(slope, 2)})",
@@ -87,8 +91,8 @@ for parameter in parameters_list:
                 ],
             )
             plt.loglog(
-                xs[trunc:],
-                np.exp(b) * xs[trunc:] ** slope,
+                xs[trunc_btm:trunc_top],
+                np.exp(b) * xs[trunc_btm:trunc_top] ** slope,
                 "--",
                 color="k",
             )

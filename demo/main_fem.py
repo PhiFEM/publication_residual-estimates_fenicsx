@@ -18,6 +18,7 @@ from utils import (
     fem_solve,
     marking,
     residual_estimation,
+    write_log,
 )
 
 parent_dir = os.path.dirname(__file__)
@@ -30,12 +31,12 @@ parser = argparse.ArgumentParser(
 parser.add_argument("parameters", type=str, help="Choose the demo/parameters to run.")
 
 args = parser.parse_args()
-demo, parameters = args.parameters.split(sep="/")
+demo, parameters_name = args.parameters.split(sep="/")
 
-ref = parameters == "reference"
+ref = parameters_name == "reference"
 
 source_dir = os.path.join(parent_dir, demo)
-output_dir = os.path.join(source_dir, "output_" + parameters)
+output_dir = os.path.join(source_dir, "output_" + parameters_name)
 
 checkpoint_dir = os.path.join(output_dir, "checkpoints")
 
@@ -80,7 +81,7 @@ if not exact_solution_available:
     source_term = generate_source_term(np)
     dirichlet_data = generate_dirichlet_data(np)
 
-with open(os.path.join(source_dir, parameters + ".yaml"), "rb") as f:
+with open(os.path.join(source_dir, parameters_name + ".yaml"), "rb") as f:
     parameters = yaml.safe_load(f)
 
 initial_mesh_size = parameters["initial_mesh_size"]
@@ -109,6 +110,7 @@ results = {
 }
 
 for i in range(iterations_num):
+    prefix = f"Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
     plot_mesh(
         mesh,
         os.path.join(meshes_dir, f"mesh_{str(i).zfill(2)}"),
@@ -138,6 +140,7 @@ for i in range(iterations_num):
     gh = dfx.fem.Function(fe_space)
     gh.interpolate(dirichlet_data)
 
+    write_log(prefix + "FEM solve.")
     solution = fem_solve(fe_space, fh, gh)
 
     checkpoint_file = os.path.join(checkpoint_dir, f"checkpoint_{str(i).zfill(2)}.bp")
@@ -154,6 +157,7 @@ for i in range(iterations_num):
     dx = ufl.Measure("dx", domain=mesh)
     dS = ufl.Measure("dS", domain=mesh)
     measures = {"dx": dx, "dS": dS}
+    write_log(prefix + "Residual estimation.")
     eta_dict = residual_estimation(dg0_space, solution, fh, gh, measures, curved=curved)
 
     est_h = dfx.fem.Function(dg0_space)
@@ -171,17 +175,22 @@ for i in range(iterations_num):
     )
 
     df = pl.DataFrame(results)
+    header = f"======================================================================================================\nITERATION: {str(i).zfill(2)}  TEST CASE: {demo}  METHOD: {parameters_name}\n======================================================================================================"
+    print(header)
     print(df)
     df.write_csv(os.path.join(output_dir, "results.csv"))
 
     uniform_ref = refinement == "unif" or ref and i > iterations_num - 3
     # Marking and refinement
     if uniform_ref:
+        write_log(prefix + "Refinement.")
         mesh = geoModel.refineMarkedElements(tdim, all_cells)[0]
         if curved:
             mesh = geoModel.curveField(3)
     else:
+        write_log(prefix + "Marking.")
         facets_indices, cells_indices = marking(est_h, dorfler_param)
+        write_log(prefix + "Refinement.")
         mesh = geoModel.refineMarkedElements(tdim, cells_indices)[0]
         if curved:
             mesh = geoModel.curveField(3)

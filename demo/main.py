@@ -21,6 +21,7 @@ from utils import (
     phifem_direct_solve,
     phifem_dual_solve,
     residual_estimation,
+    write_log,
 )
 
 parent_dir = os.path.dirname(__file__)
@@ -34,12 +35,12 @@ parser.add_argument("parameters", type=str, help="Choose the demo/parameters to 
 parser.add_argument("--plot", action="store_true", help="Plot cells and facets tags.")
 
 args = parser.parse_args()
-demo, parameters = args.parameters.split(sep="/")
+demo, parameters_name = args.parameters.split(sep="/")
 plot = args.plot
 
 
 source_dir = os.path.join(parent_dir, demo)
-output_dir = os.path.join(source_dir, "output_" + parameters)
+output_dir = os.path.join(source_dir, "output_" + parameters_name)
 
 checkpoint_dir = os.path.join(output_dir, "checkpoints")
 
@@ -97,7 +98,7 @@ except ImportError:
     )
     generate_detection_levelset = generate_levelset
 
-with open(os.path.join(source_dir, parameters + ".yaml"), "rb") as f:
+with open(os.path.join(source_dir, parameters_name + ".yaml"), "rb") as f:
     parameters = yaml.safe_load(f)
 
 initial_mesh_size = parameters["initial_mesh_size"]
@@ -142,6 +143,7 @@ results = {
 
 
 for i in range(iterations_num):
+    prefix = f"Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
     cell_name = mesh.topology.cell_name()
     levelset_element = element("Lagrange", cell_name, levelset_degree)
     levelset_bg_space = dfx.fem.functionspace(mesh, levelset_element)
@@ -151,6 +153,7 @@ for i in range(iterations_num):
     else:
         x_ufl = ufl.SpatialCoordinate(mesh)
         detection_levelset = generate_detection_levelset(ufl)(x_ufl)
+    write_log(prefix + "Computation of mesh tags")
     if box_mode:
         cells_tags, facets_tags, _, ds, _, _ = compute_tags_measures(
             mesh, detection_levelset, detection_degree, box_mode=box_mode
@@ -167,6 +170,7 @@ for i in range(iterations_num):
         linewidth=1.5,
     )
     if plot:
+        write_log(prefix + "Plot mesh tags")
         leg_dict = {1: "inside", 2: "cut", 3: "outside"}
         plot_levelset = generate_detection_levelset(np)
         fig = plt.figure()
@@ -302,6 +306,7 @@ for i in range(iterations_num):
         fh = -ufl.div(ufl.grad(exact_solution))
         gh = exact_solution
 
+    write_log(prefix + "phiFEM solve.")
     if dual:
         solution_u, solution_p = phifem_dual_solve(
             mixed_space, fh, gh, phih, measures, coefs
@@ -340,6 +345,7 @@ for i in range(iterations_num):
     adios4dolfinx.write_function(checkpoint_file, solution_p, name="solution_p")
 
     # Residual error estimation
+    write_log(prefix + "Residual estimation.")
     if dual:
         eta_dict = residual_estimation(
             dg0_space,
@@ -372,6 +378,7 @@ for i in range(iterations_num):
         else:
             solution = solution_w
 
+        print(prefix + "Computation boundary estimator.")
         eta_dict["eta_1_z"], eta_dict["eta_0_z"], parent_cells_tags, fine_mesh = (
             compute_boundary_local_estimators(
                 mesh, solution, levelset, phih, cells_tags, facets_tags, dual=dual
@@ -419,13 +426,18 @@ for i in range(iterations_num):
     plot_scalar(est_h, os.path.join(estimators_dir, f"estimator_{str(i).zfill(2)}"))
 
     df = pl.DataFrame(results)
+    header = f"======================================================================================================\nITERATION: {str(i).zfill(2)}  TEST CASE: {demo}  METHOD: {parameters_name}\n======================================================================================================"
+    print(header)
     print(df)
     df.write_csv(os.path.join(output_dir, "results.csv"))
 
     if i < iterations_num:
         # Marking and refinement
         if refinement == "adap":
+            write_log(prefix + "Marking.")
             facets_indices = marking(est_h, dorfler_param)[0]
+            write_log(prefix + "Refinement.")
             mesh = dfx.mesh.refine(mesh, facets_indices)[0]
         elif refinement == "unif":
+            write_log(prefix + "Refinement.")
             mesh = dfx.mesh.refine(mesh)[0]

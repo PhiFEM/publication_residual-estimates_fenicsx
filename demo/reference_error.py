@@ -22,6 +22,7 @@ from utils import (
     compute_l2_error_p,
     compute_source_term_oscillations,
     compute_xi_h10_l2,
+    write_log,
 )
 
 parent_dir = os.path.dirname(__file__)
@@ -86,8 +87,14 @@ if phifem:
 with open(os.path.join(source_dir, "reference.yaml"), "rb") as f:
     ref_parameters = yaml.safe_load(f)
 
-ref_max_iteration = ref_parameters["iterations_number"] - 1
 ref_degree = ref_parameters["finite_element_degree"]
+
+nums = []
+for f in os.listdir(os.path.join(source_dir, "output_reference", "checkpoints")):
+    if f.endswith(".bp"):
+        num = f[:-3].split(sep="_")[-1]
+        nums.append(int(num))
+ref_max_iteration = sorted(nums)[-1]
 
 reference_mesh = adios4dolfinx.read_mesh(
     os.path.join(
@@ -121,6 +128,7 @@ ref_dg1_space = dfx.fem.functionspace(reference_mesh, ref_dg1_element)
 
 # Load reference source terms
 if not exact_solution_available:
+    write_log("Read reference solution.")
     source_term = generate_source_term(np)
     ref_f = dfx.fem.Function(reference_space)
     ref_f.interpolate(source_term)
@@ -139,6 +147,7 @@ if not exact_solution_available:
         name="solution_u",
     )
 else:
+    write_log("Interpolate analytical solution.")
     ref_solution = generate_exact_solution(ufl)
     ref_x = ufl.SpatialCoordinate(reference_mesh)
     reference_solution = ref_solution(ref_x)
@@ -163,6 +172,8 @@ results["xi_h10"] = [np.nan] * iterations_num
 results["xi_l2"] = [np.nan] * iterations_num
 
 for i in range(iterations_num):
+    prefix = f"Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
+    write_log(prefix + "Load mesh.")
     # Load coarse mesh, create FE spaces and load functions
     mesh = adios4dolfinx.read_mesh(
         os.path.join(
@@ -181,6 +192,7 @@ for i in range(iterations_num):
     solution_u = dfx.fem.Function(fe_space)
     solution_p = dfx.fem.Function(dg1_space)
 
+    write_log(prefix + "Load solution_u.")
     adios4dolfinx.read_function(
         os.path.join(
             checkpoint_dir,
@@ -193,6 +205,7 @@ for i in range(iterations_num):
         reference_space, fe_space, reference_cells, padding=1.0e-14
     )
     if phifem:
+        write_log(prefix + "Load solution_p.")
         adios4dolfinx.read_function(
             os.path.join(
                 checkpoint_dir,
@@ -201,6 +214,7 @@ for i in range(iterations_num):
             solution_p,
             name="solution_p",
         )
+        write_log(prefix + "Load levelset.")
         adios4dolfinx.read_function(
             os.path.join(
                 checkpoint_dir,
@@ -209,6 +223,7 @@ for i in range(iterations_num):
             fe_levelset,
             name="levelset",
         )
+        write_log(prefix + "Load cells_tags.")
         cells_tags = adios4dolfinx.read_meshtags(
             os.path.join(
                 checkpoint_dir,
@@ -264,6 +279,7 @@ for i in range(iterations_num):
     solution_u_2_ref.interpolate_nonmatching(solution_u, reference_cells, nmm_fe2ref)
 
     # Compute reference H10 error
+    write_log(prefix + "Compute H10 error.")
     ref_h10_norm, coarse_h10_norm = compute_h10_error(
         solution_u_2_ref, reference_solution, ref_dg0_space, dg0_space
     )
@@ -290,6 +306,7 @@ for i in range(iterations_num):
             os.path.join(errors_dir, f"ref_coarse_mesh_h_T_{str(i).zfill(2)}"),
         )
 
+        write_log(prefix + "Compute L2 error p.")
         ref_l2_p_err = compute_l2_error_p(
             dg1_solution_p_2_ref_dg1,
             reference_solution,
@@ -382,5 +399,7 @@ for i in range(iterations_num):
         results["total_error"][i] = results["error"][i]
 
     df = pl.DataFrame(results)
+    header = f"======================================================================================================\nITERATION: {str(i).zfill(2)}  TEST CASE: {demo}  METHOD: {parameters_name}\n======================================================================================================"
+    print(header)
     print(df)
     df.write_csv(os.path.join(output_dir, "results.csv"))

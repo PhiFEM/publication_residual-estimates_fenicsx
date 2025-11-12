@@ -1,3 +1,6 @@
+import datetime
+import os
+
 import dolfinx as dfx
 import numpy as np
 import ufl
@@ -5,6 +8,14 @@ from basix.ufl import element
 from dolfinx.cpp.refinement import RefinementOption
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector
 from petsc4py import PETSc
+
+parent_dir = os.path.dirname(__file__)
+
+
+def write_log(text):
+    dt = str(datetime.datetime.now()).split(sep=".")[0]
+    with open(os.path.join(parent_dir, "run.log"), "a") as log_file:
+        log_file.write(dt + "\t" + text + "\n")
 
 
 def _reshape_facets_map(f2c_connect):
@@ -347,16 +358,16 @@ def phifem_dual_solve(mixed_space, fh, gh, phih, measures, coefs):
 
     # PETSc solver
     solver = PETSc.KSP().create(mesh.comm)
-    solver.setType("preonly")
+    solver.setType("cg")
     solver.setOperators(A)
     pc = solver.getPC()
-    pc.setType("lu")
+    pc.setType("hypre")
 
     # Let mumps handle the null space in box mode
     pc.setFactorSolverType("mumps")
     pc.setFactorSetUpSolverType()
-    pc.getFactorMatrix().setMumpsIcntl(icntl=24, ival=1)
-    pc.getFactorMatrix().setMumpsIcntl(icntl=25, ival=0)
+    # pc.getFactorMatrix().setMumpsIcntl(icntl=24, ival=1)
+    # pc.getFactorMatrix().setMumpsIcntl(icntl=25, ival=0)
 
     # Solve linear system
     solution_w = dfx.fem.Function(mixed_space)
@@ -401,10 +412,10 @@ def fem_solve(fe_space, fh, gh):
 
     # PETSc solver
     solver = PETSc.KSP().create(mesh.comm)
-    solver.setType("preonly")
+    solver.setType("cg")
     solver.setOperators(A)
     pc = solver.getPC()
-    pc.setType("cholesky")
+    pc.setType("hypre")
 
     solution = dfx.fem.Function(fe_space)
     solver.solve(b, solution.x.petsc_vec)
