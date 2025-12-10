@@ -94,63 +94,72 @@ def plot_mesh(mesh, name, wireframe=False, linewidth=1.0):
         of.write_mesh(mesh)
 
 
-def plot_scalar(fct, name, warp_by_scalar=False):
-    path = os.path.split(name)[:-1][0]
-    file_name = os.path.split(name)[-1]
-    fct_space = fct.function_space
-
-    fct_degree = fct_space.ufl_element().basix_element.degree
-
-    if fct_degree == 0:
-        mesh = fct_space.mesh
-        cells, types, x = dfx.plot.vtk_mesh(mesh)
+def plot_scalar(fct, name, warp_by_scalar=False, xdmf=False):
+    if xdmf:
+        mesh = fct.function_space.mesh
+        with XDMFFile(mesh.comm, name + ".xdmf", "w") as of:
+            of.write_mesh(mesh)
+            of.write_function(fct)
     else:
-        cells, types, x = dfx.plot.vtk_mesh(fct_space)
+        path = os.path.split(name)[:-1][0]
+        file_name = os.path.split(name)[-1]
+        fct_space = fct.function_space
 
-    grid = pv.UnstructuredGrid(cells, types, x)
-    if fct_degree == 0:
-        grid.cell_data[file_name] = fct.x.array
-    else:
-        grid.point_data[file_name] = fct.x.array
+        fct_degree = fct_space.ufl_element().basix_element.degree
 
-    grid.set_active_scalars(file_name)
+        if fct_degree == 0:
+            mesh = fct_space.mesh
+            cells, types, x = dfx.plot.vtk_mesh(mesh)
+        else:
+            cells, types, x = dfx.plot.vtk_mesh(fct_space)
 
-    plotter = pv.Plotter()
-    if not warp_by_scalar:
-        plotter.add_text(
-            "Scalar contour field", font_size=14, color="black", position="upper_edge"
-        )
-        plotter.add_mesh(grid, show_edges=False, show_scalar_bar=True)
-        plotter.view_xy()
-        plotter.enable_rubber_band_2d_style()
-        plotter.add_legend_scale()
-        plotter.show_grid()
-        plotter.export_html(name + ".html")
-    else:
-        fct_max = np.max(np.abs(fct.x.array))
-        warped = grid.warp_by_scalar(factor=1.0 / fct_max)
-        plotter.add_text(
-            "Warped function", position="upper_edge", font_size=14, color="black"
-        )
-        sargs = dict(
-            height=0.8,
-            width=0.1,
-            vertical=True,
-            position_x=0.05,
-            position_y=0.05,
-            title_font_size=40,
-            color="black",
-            label_font_size=25,
-            interactive=True,
-        )
-        plotter.add_mesh(warped, show_edges=False, scalar_bar_args=sargs)
-        plotter.add_axes()
-        plotter.show_grid()
-        plotter.export_html(os.path.join(path, "wbs_" + file_name + ".html"))
+        grid = pv.UnstructuredGrid(cells, types, x)
+        if fct_degree == 0:
+            grid.cell_data[file_name] = fct.x.array
+        else:
+            grid.point_data[file_name] = fct.x.array
 
-    plotter.save_graphic(os.path.join(path, file_name + ".svg"))
+        grid.set_active_scalars(file_name)
 
-    plotter.close()
+        plotter = pv.Plotter()
+        if not warp_by_scalar:
+            plotter.add_text(
+                "Scalar contour field",
+                font_size=14,
+                color="black",
+                position="upper_edge",
+            )
+            plotter.add_mesh(grid, show_edges=False, show_scalar_bar=True)
+            plotter.view_xy()
+            plotter.enable_rubber_band_2d_style()
+            plotter.add_legend_scale()
+            plotter.show_grid()
+            plotter.export_html(name + ".html")
+        else:
+            fct_max = np.max(np.abs(fct.x.array))
+            warped = grid.warp_by_scalar(factor=1.0 / fct_max)
+            plotter.add_text(
+                "Warped function", position="upper_edge", font_size=14, color="black"
+            )
+            sargs = dict(
+                height=0.8,
+                width=0.1,
+                vertical=True,
+                position_x=0.05,
+                position_y=0.05,
+                title_font_size=40,
+                color="black",
+                label_font_size=25,
+                interactive=True,
+            )
+            plotter.add_mesh(warped, show_edges=False, scalar_bar_args=sargs)
+            plotter.add_axes()
+            plotter.show_grid()
+            plotter.export_html(os.path.join(path, "wbs_" + file_name + ".html"))
+
+        plotter.save_graphic(os.path.join(path, file_name + ".svg"))
+
+        plotter.close()
 
 
 def write_frame(mesh, plotter, uh, name):

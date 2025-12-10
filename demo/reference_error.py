@@ -10,6 +10,7 @@ import polars as pl
 import ufl
 import yaml
 from basix.ufl import element
+from dolfinx.io import XDMFFile
 from mpi4py import MPI
 
 sys.path.append("../")
@@ -78,7 +79,15 @@ if not exact_solution_available:
 with open(os.path.join(source_dir, parameters_name + ".yaml"), "rb") as f:
     parameters = yaml.safe_load(f)
 
-iterations_num = parameters["iterations_number"]
+nums = []
+for f in os.listdir(
+    os.path.join(source_dir, "output_" + parameters_name, "checkpoints")
+):
+    if f.endswith(".bp"):
+        num = f[:-3].split(sep="_")[-1]
+        nums.append(int(num))
+iterations_num = sorted(nums)[-1] + 1
+
 fe_degree = parameters["finite_element_degree"]
 phifem = "phifem" in parameters_name
 if phifem:
@@ -119,7 +128,7 @@ if phifem:
     levelset_element = element("Lagrange", cell_name, levelset_degree)
     reference_levelset_space = dfx.fem.functionspace(reference_mesh, levelset_element)
 dg0_element = element("DG", cell_name, 0)
-dg1_element = element("DG", cell_name, 1)
+dg1_element = element("DG", cell_name, 0)
 
 reference_space = dfx.fem.functionspace(reference_mesh, ref_element)
 ref_dg0_space = dfx.fem.functionspace(reference_mesh, dg0_element)
@@ -172,7 +181,7 @@ results["xi_h10"] = [np.nan] * iterations_num
 results["xi_l2"] = [np.nan] * iterations_num
 
 for i in range(iterations_num):
-    prefix = f"Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
+    prefix = f"REFERENCE ERROR | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
     write_log(prefix + "Load mesh.")
     # Load coarse mesh, create FE spaces and load functions
     mesh = adios4dolfinx.read_mesh(
@@ -289,6 +298,12 @@ for i in range(iterations_num):
             coarse_h10_norm, os.path.join(errors_dir, f"h10_error_{str(i).zfill(2)}")
         )
 
+    with XDMFFile(
+        reference_mesh.comm, os.path.join(errors_dir, "ref_h10_error.xdmf"), "w"
+    ) as of:
+        of.write_mesh(reference_mesh)
+        of.write_function(ref_h10_norm)
+
     h10_err_sqd = ref_h10_norm.x.array.sum()
     results["error"][i] = np.sqrt(h10_err_sqd)
 
@@ -304,6 +319,7 @@ for i in range(iterations_num):
         plot_scalar(
             dg0_coarse_h_T_2_ref,
             os.path.join(errors_dir, f"ref_coarse_mesh_h_T_{str(i).zfill(2)}"),
+            xdmf=True,
         )
 
         write_log(prefix + "Compute L2 error p.")
@@ -317,6 +333,15 @@ for i in range(iterations_num):
             ref_dg0_space,
         )
 
+        with XDMFFile(
+            reference_mesh.comm, os.path.join(errors_dir, "ref_l2_p_error.xdmf"), "w"
+        ) as of:
+            of.write_mesh(reference_mesh)
+            of.write_function(ref_l2_p_err)
+
+        assert not np.any(np.isnan(ref_l2_p_err.x.array)), (
+            "ref_l2_p_err.x.array contains NaNs."
+        )
         plot_scalar(
             ref_l2_p_err, os.path.join(errors_dir, f"l2_p_err_{str(i).zfill(2)}")
         )
@@ -399,7 +424,7 @@ for i in range(iterations_num):
         results["total_error"][i] = results["error"][i]
 
     df = pl.DataFrame(results)
-    header = f"======================================================================================================\nITERATION: {str(i).zfill(2)}  TEST CASE: {demo}  METHOD: {parameters_name}\n======================================================================================================"
+    header = f"======================================================================================================\n{prefix}\n======================================================================================================"
     print(header)
     print(df)
     df.write_csv(os.path.join(output_dir, "results.csv"))

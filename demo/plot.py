@@ -19,9 +19,17 @@ parser.add_argument(
     help="List of quantities to plot.",
 )
 
+parser.add_argument(
+    "trunc",
+    type=int,
+    default=1,
+    help="Truncation of the top of the data to be plotted.",
+)
+
 args = parser.parse_args()
 parameters_list = args.parameters.split(sep=",")
 data_list = args.data.split(sep=",")
+trunc_top = -args.trunc
 
 fig = plt.figure()
 ax = fig.subplots()
@@ -30,6 +38,7 @@ parameter_names = []
 with open(os.path.join(parent_dir, "plot_parameters.yaml"), "rb") as f:
     plot_param = yaml.safe_load(f)
 
+eta_comp = np.all(["eta" in data for data in data_list])
 for parameter in parameters_list:
     demo, param_name = parameter.split(sep="/")
 
@@ -41,7 +50,6 @@ for parameter in parameters_list:
     ref_type = parameters["refinement"]
     mesh_type = parameters["mesh_type"]
     scheme_name = plot_param[param_name]["name"]
-    trunc_top = -5
     if ref_type == "unif":
         trunc_btm = trunc_top - 3
     elif ref_type == "adap":
@@ -55,6 +63,10 @@ for parameter in parameters_list:
     df = pl.read_csv(data_path)
     for d in data_list:
         d_name = plot_param[d]["name"]
+        if eta_comp:
+            label = rf"{d_name}"
+        else:
+            label = rf"{d_name} ({scheme_name})"
         lstyle = plot_param[d]["line"]
         color = plot_param[d]["color"]
         xs = df["dof"].to_numpy()
@@ -71,30 +83,16 @@ for parameter in parameters_list:
         except ValueError:
             ys_not_zero = False
         if ys_not_zero:
-            slope, b = np.polyfit(
-                np.log(xs[trunc_btm:trunc_top]),
-                np.log(ys[trunc_btm:trunc_top]),
-                1,
-            )
-        else:
-            continue
-        if ys_not_zero:
             plt.loglog(
                 xs[:trunc_top],
                 ys[:trunc_top],
                 lstyle + mstyle,
                 c=color,
-                label=rf"{d_name} ({scheme_name}; {np.round(slope, 2)})",
+                label=label,
                 path_effects=[
                     pe.Stroke(linewidth=2.5, foreground="#252525"),
                     pe.Normal(),
                 ],
-            )
-            plt.loglog(
-                xs[trunc_btm:trunc_top],
-                np.exp(b) * xs[trunc_btm:trunc_top] ** slope,
-                "--",
-                color="k",
             )
         else:
             continue

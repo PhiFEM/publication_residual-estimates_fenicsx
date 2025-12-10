@@ -358,16 +358,16 @@ def phifem_dual_solve(mixed_space, fh, gh, phih, measures, coefs):
 
     # PETSc solver
     solver = PETSc.KSP().create(mesh.comm)
-    solver.setType("cg")
+    solver.setType("preonly")
     solver.setOperators(A)
     pc = solver.getPC()
-    pc.setType("hypre")
+    pc.setType("lu")
 
     # Let mumps handle the null space in box mode
     pc.setFactorSolverType("mumps")
     pc.setFactorSetUpSolverType()
-    # pc.getFactorMatrix().setMumpsIcntl(icntl=24, ival=1)
-    # pc.getFactorMatrix().setMumpsIcntl(icntl=25, ival=0)
+    pc.getFactorMatrix().setMumpsIcntl(icntl=24, ival=1)
+    pc.getFactorMatrix().setMumpsIcntl(icntl=25, ival=0)
 
     # Solve linear system
     solution_w = dfx.fem.Function(mixed_space)
@@ -412,10 +412,10 @@ def fem_solve(fe_space, fh, gh):
 
     # PETSc solver
     solver = PETSc.KSP().create(mesh.comm)
-    solver.setType("cg")
+    solver.setType("preonly")
     solver.setOperators(A)
     pc = solver.getPC()
-    pc.setType("hypre")
+    pc.setType("cholesky")
 
     solution = dfx.fem.Function(fe_space)
     solver.solve(b, solution.x.petsc_vec)
@@ -615,7 +615,8 @@ def compute_l2_error_p(
     l2_p_err_vec = dfx.fem.assemble_vector(l2_norm_p_form)
 
     ref_l2_p_err = dfx.fem.Function(ref_dg0_space)
-    ref_l2_p_err.x.array[:] = l2_p_err_vec.array[:]
+    # We replace eventual NaN values with zero.
+    ref_l2_p_err.x.array[:] = np.nan_to_num(l2_p_err_vec.array[:], copy=False, nan=0.0)
     return ref_l2_p_err
 
 

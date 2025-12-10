@@ -2,14 +2,20 @@ phifem:
   name: "$\\varphi$-FEM, $\\eta_1$"
   marker: "p"
 phifem-dir:
-  name: "$\\varphi$-FEM, $\\eta_2$"
+  name: "$\\varphi$-FEM, $\\eta_3$"
   marker: "s"
 phifem-bdy:
-  name: "$\\varphi$-FEM, $\\eta_3$"
+  name: "$\\varphi$-FEM, $\\eta_2$"
   marker: "*"
 phifem-dir-bdy:
   name: "$\\varphi$-FEM, $\\eta$"
   marker: "^"
+phifem-dir-bdy-2:
+  name: "$\\varphi$-FEM, $\\eta$ 2"
+  marker: "v"
+phifem_3:
+  name: "$\\varphi$-FEM, $\\eta$ (DG0 $p$)"
+  marker: "v"
 fem:
   name: "FEM, $\\eta_1$"
   marker: "o"
@@ -22,7 +28,7 @@ error:
   line: "-"
   color: "#377eb8"
 total_error:
-  name: "$|||(u,p) - (u_h, p_h)|||_{\\Omega}$"
+  name: "$|||E|||_{\\Omega}$"
   line: "-."
   color: "#4daf4a"
 l2_p_error:
@@ -68,4 +74,4 @@ xi_l2:
 meshtags:
   cells: ["#2166ac", "#ef8a62", "#b2182b"]
   facets: ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#ffff33"]
-legend_text_size: 8
+legend_text_size: 12

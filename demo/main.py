@@ -102,7 +102,7 @@ with open(os.path.join(source_dir, parameters_name + ".yaml"), "rb") as f:
     parameters = yaml.safe_load(f)
 
 initial_mesh_size = parameters["initial_mesh_size"]
-iterations_num = parameters["iterations_number"]
+max_dof = float(parameters["maximum_dof"])
 fe_degree = parameters["finite_element_degree"]
 levelset_degree = parameters["levelset_degree"]
 solution_degree = parameters["solution_degree"]
@@ -141,9 +141,10 @@ results = {
     "eta_0_z": [],
 }
 
-
-for i in range(iterations_num):
-    prefix = f"Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
+num_dof = 0
+i = 0
+while num_dof < max_dof:
+    prefix = f"PHIFEM | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
     cell_name = mesh.topology.cell_name()
     levelset_element = element("Lagrange", cell_name, levelset_degree)
     levelset_bg_space = dfx.fem.functionspace(mesh, levelset_element)
@@ -255,7 +256,8 @@ for i in range(iterations_num):
         aux_space, cdim, cells_tags.find(2)
     )
 
-    results["dof"].append(len(fe_active_dofs) + len(aux_active_dofs))
+    num_dof = len(fe_active_dofs) + len(aux_active_dofs)
+    results["dof"].append(num_dof)
 
     checkpoint_file = os.path.join(checkpoint_dir, f"checkpoint_{str(i).zfill(2)}.bp")
     adios4dolfinx.write_mesh(checkpoint_file, mesh)
@@ -329,11 +331,11 @@ for i in range(iterations_num):
     plot_scalar(
         solution_p, os.path.join(solutions_dir, f"solution_p_{str(i).zfill(2)}")
     )
-    plot_scalar(
-        solution_p,
-        os.path.join(solutions_dir, f"solution_p_{str(i).zfill(2)}"),
-        warp_by_scalar=True,
-    )
+    # plot_scalar(
+    #     solution_p,
+    #     os.path.join(solutions_dir, f"solution_p_{str(i).zfill(2)}"),
+    #     warp_by_scalar=True,
+    # )
 
     adios4dolfinx.write_meshtags(
         checkpoint_file, mesh, cells_tags, meshtag_name="cells_tags"
@@ -378,7 +380,7 @@ for i in range(iterations_num):
         else:
             solution = solution_w
 
-        print(prefix + "Computation boundary estimator.")
+        write_log(prefix + "Computation boundary estimator.")
         eta_dict["eta_1_z"], eta_dict["eta_0_z"], parent_cells_tags, fine_mesh = (
             compute_boundary_local_estimators(
                 mesh, solution, levelset, phih, cells_tags, facets_tags, dual=dual
@@ -426,12 +428,12 @@ for i in range(iterations_num):
     plot_scalar(est_h, os.path.join(estimators_dir, f"estimator_{str(i).zfill(2)}"))
 
     df = pl.DataFrame(results)
-    header = f"======================================================================================================\nITERATION: {str(i).zfill(2)}  TEST CASE: {demo}  METHOD: {parameters_name}\n======================================================================================================"
+    header = f"======================================================================================================\n{prefix}\n======================================================================================================"
     print(header)
     print(df)
     df.write_csv(os.path.join(output_dir, "results.csv"))
 
-    if i < iterations_num:
+    if num_dof < max_dof:
         # Marking and refinement
         if refinement == "adap":
             write_log(prefix + "Marking.")
@@ -441,3 +443,5 @@ for i in range(iterations_num):
         elif refinement == "unif":
             write_log(prefix + "Refinement.")
             mesh = dfx.mesh.refine(mesh)[0]
+
+    i += 1

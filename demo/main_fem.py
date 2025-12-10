@@ -85,7 +85,7 @@ with open(os.path.join(source_dir, parameters_name + ".yaml"), "rb") as f:
     parameters = yaml.safe_load(f)
 
 initial_mesh_size = parameters["initial_mesh_size"]
-iterations_num = parameters["iterations_number"]
+max_dof = float(parameters["maximum_dof"])
 fe_degree = parameters["finite_element_degree"]
 dorfler_param = parameters["marking_parameter"]
 refinement = parameters["refinement"]
@@ -109,8 +109,16 @@ results = {
     "eta_E": [],
 }
 
-for i in range(iterations_num):
-    prefix = f"Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
+num_dof = 0
+i = 0
+j = 0
+stopping_criterion = num_dof < max_dof
+while stopping_criterion:
+    if ref:
+        stopping_criterion = (num_dof < max_dof) and j <= 0
+    else:
+        stopping_criterion = num_dof < max_dof
+    prefix = f"FEM | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
     plot_mesh(
         mesh,
         os.path.join(meshes_dir, f"mesh_{str(i).zfill(2)}"),
@@ -125,7 +133,8 @@ for i in range(iterations_num):
     )
     mesh.topology.create_connectivity(tdim, tdim)
     active_dofs = dfx.fem.locate_dofs_topological(fe_space, tdim, all_cells)
-    results["dof"].append(len(active_dofs))
+    num_dof = len(active_dofs)
+    results["dof"].append(num_dof)
     dg0_space = dfx.fem.functionspace(mesh, dg0_element)
 
     if exact_solution_available:
@@ -175,22 +184,25 @@ for i in range(iterations_num):
     )
 
     df = pl.DataFrame(results)
-    header = f"======================================================================================================\nITERATION: {str(i).zfill(2)}  TEST CASE: {demo}  METHOD: {parameters_name}\n======================================================================================================"
+    header = f"======================================================================================================\n{prefix}\n======================================================================================================"
     print(header)
     print(df)
     df.write_csv(os.path.join(output_dir, "results.csv"))
 
-    uniform_ref = refinement == "unif" or ref and i > iterations_num - 3
     # Marking and refinement
-    if uniform_ref:
-        write_log(prefix + "Refinement.")
+    if (ref and (num_dof > max_dof) and j < 1) or (refinement == "unif"):
+        write_log(prefix + "Refinement (uniform).")
         mesh = geoModel.refineMarkedElements(tdim, all_cells)[0]
         if curved:
             mesh = geoModel.curveField(3)
+        if refinement != "unif":
+            j += 1
     else:
         write_log(prefix + "Marking.")
         facets_indices, cells_indices = marking(est_h, dorfler_param)
-        write_log(prefix + "Refinement.")
+        write_log(prefix + "Refinement (adaptive).")
         mesh = geoModel.refineMarkedElements(tdim, cells_indices)[0]
         if curved:
             mesh = geoModel.curveField(3)
+
+    i += 1
