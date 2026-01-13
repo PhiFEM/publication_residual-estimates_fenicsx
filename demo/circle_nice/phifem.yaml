@@ -1,12 +1,12 @@
-# Oursin test case
+# Circle with smooth boundary condition test case
 initial_mesh_size: 0.1
-iterations_number: 32
+maximum_dof: 1e5
 refinement: "adap"
-mesh_type: "sub"
+mesh_type: "bg"
 finite_element_degree: 1
 auxiliary_degree: 1
 levelset_degree: 1
-boundary_detection_degree: 2
+boundary_detection_degree: 1
 solution_degree: 1
 boundary_correction: false
 dirichlet_estimator: false
@@ -17,4 +17,4 @@ discretize_levelset: false
 bbox:
 - [-1.5, 1.5]
 - [-1.5, 1.5]
-name: "$\\varphi$-FEM (no BC,geo)"
+name: "$\\varphi$-FEM (no BC,no geo)"

@@ -17,6 +17,7 @@ from utils import (
     fem_solve,
     marking,
     residual_estimation,
+    save_function,
     write_log,
 )
 
@@ -145,6 +146,10 @@ while stopping_criterion:
     write_log(prefix + "FEM solve.")
     solution = fem_solve(fe_space, fh, gh)
 
+    if not curved:
+        save_function(
+            solution, os.path.join(solutions_dir, f"solution_u_{str(i).zfill(2)}")
+        )
     checkpoint_file = os.path.join(checkpoint_dir, f"checkpoint_{str(i).zfill(2)}.bp")
     adios4dolfinx.write_mesh(checkpoint_file, mesh)
     adios4dolfinx.write_function(checkpoint_file, solution, name="solution_u")

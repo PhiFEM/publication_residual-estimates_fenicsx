@@ -1,9 +1,8 @@
 # Circle with smooth boundary condition test case
 initial_mesh_size: 0.1
-iterations_number: 32
+maximum_dof: 1e6
 refinement: "adap"
-mesh_type: "sub"
+mesh_type: "bg"
 finite_element_degree: 1
 marking_parameter: 0.3
 curved: False
-name: "FEM"

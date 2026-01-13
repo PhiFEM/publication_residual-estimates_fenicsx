@@ -23,11 +23,11 @@ estimator:
   name: "$\\eta$"
   line: "--"
   color: "#e41a1c"
-error:
+h10_error:
   name: "$|e|_{1,\\Omega}$"
   line: "-"
   color: "#377eb8"
-total_error:
+triple_norm_error:
   name: "$|||E|||_{\\Omega}$"
   line: "-."
   color: "#4daf4a"
