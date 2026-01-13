@@ -3,10 +3,13 @@ import os
 
 import dolfinx as dfx
 import numpy as np
+import pyvista as pv
 import ufl
 from basix.ufl import element
 from dolfinx.cpp.refinement import RefinementOption
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector
+from dolfinx.io import XDMFFile
+from matplotlib.colors import ListedColormap
 from petsc4py import PETSc
 
 parent_dir = os.path.dirname(__file__)
@@ -45,37 +48,6 @@ def _reshape_facets_map(f2c_connect):
 
 def delta(u):
     return ufl.div(ufl.grad(u))
-
-
-def save_function(fct: dfx.fem.Function, file_path: str, mode=dfx.io.XDMFFile):
-    """Save a dolfinx function using XDMFFile and interpolate it to a linear space if needed.
-
-    Args:
-        fct: the dolfinx Function to save.
-        file_path: the path where the xdmf file is saved.
-    """
-    mesh = fct.function_space.mesh
-    fct_element = fct.function_space.element.basix_element
-    deg = fct_element.degree
-    if deg > 1:
-        element_family = fct_element.family.name
-        mesh = fct.function_space.mesh
-        cg1_element = element(
-            element_family,
-            mesh.topology.cell_name(),
-            1,
-            shape=fct.function_space.value_shape,
-        )
-        cg1_space = dfx.fem.functionspace(mesh, cg1_element)
-        cg1_fct = dfx.fem.Function(cg1_space)
-        cg1_fct.interpolate(fct)
-        with mode(mesh.comm, file_path, "w") as of:
-            of.write_mesh(mesh)
-            of.write_function(cg1_fct)
-    else:
-        with mode(mesh.comm, file_path, "w") as of:
-            of.write_mesh(mesh)
-            of.write_function(fct)
 
 
 def compute_parent_cells(coarse_mesh, fine_mesh, initial_parent_cells):
@@ -175,7 +147,7 @@ def compute_boundary_local_estimators(
     correction_function_fine.x.array[:] = (
         phih_fine.x.array[:] - phi_fine.x.array[:]
     ) * solution_p_fine.x.array[:]
-    correction_function_fine = correction_function_fine * h_T_fine ** (-1)
+    correction_function_fine = correction_function_fine
     grad_correction = ufl.grad(correction_function_fine)
     if dual:
         measure_ind = 2
@@ -713,3 +685,28 @@ def compute_dirichlet_oscillations(
         print("Failed to interpolate h10_norm to coarse space.")
         pass
     return ref_dir_osc_norm, coarse_dir_osc_norm
+
+
+def save_function(fct, path):
+    mesh = fct.function_space.mesh
+    fct_element = fct.function_space.element.basix_element
+    deg = fct_element.degree
+    if deg > 1:
+        element_family = fct_element.family.name
+        mesh = fct.function_space.mesh
+        cg1_element = element(
+            element_family,
+            mesh.topology.cell_name(),
+            1,
+            shape=fct.function_space.value_shape,
+        )
+        cg1_space = dfx.fem.functionspace(mesh, cg1_element)
+        cg1_fct = dfx.fem.Function(cg1_space)
+        cg1_fct.interpolate(fct)
+        with XDMFFile(mesh.comm, path + ".xdmf", "w") as of:
+            of.write_mesh(mesh)
+            of.write_function(cg1_fct)
+    else:
+        with XDMFFile(mesh.comm, path + ".xdmf", "w") as of:
+            of.write_mesh(mesh)
+            of.write_function(fct)

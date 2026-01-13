@@ -1,12 +1,12 @@
 # Drop test case
-initial_mesh_size: 0.25
+initial_mesh_size: 0.05
 maximum_dof: 2.5e5
 refinement: "adap"
-mesh_type: "sub"
+mesh_type: "bg"
 finite_element_degree: 1
 auxiliary_degree: 1
 levelset_degree: 1
-boundary_detection_degree: 30
+boundary_detection_degree: 1
 solution_degree: 1
 boundary_correction: true
 dirichlet_estimator: true

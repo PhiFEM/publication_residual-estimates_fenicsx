@@ -1,16 +1,16 @@
 phifem: 
   name: "$\\varphi$-FEM, $\\eta_1$"
   marker: "p"
-phifem-dir:
+phifem-bc:
   name: "$\\varphi$-FEM, $\\eta_3$"
   marker: "s"
-phifem-bdy:
+phifem-geo:
   name: "$\\varphi$-FEM, $\\eta_2$"
   marker: "*"
-phifem-dir-bdy:
+phifem-bc-geo:
   name: "$\\varphi$-FEM, $\\eta$"
   marker: "^"
-phifem-dir-bdy-2:
+phifem-bc-geo-2:
   name: "$\\varphi$-FEM, $\\eta$ 2"
   marker: "v"
 phifem_3:
@@ -35,23 +35,23 @@ l2_p_error:
   name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|h_T^{-1}(p - p_h)\\|_{T \\cap \\Omega}^2\\right)^{1/2}$"
   line: "-"
   color: "#984ea3"
-eta_T:
+eta_r:
   name: "$\\eta_r$"
   line: "-."
   color: "#8dd3c7"
-eta_E:
+eta_J:
   name: "$\\eta_J$"
   line: "-."
   color: "#fb8072"
-eta_p:
+eta_BC:
   name: "$\\eta_{\\mathrm{BC}}$"
   line: "-."
   color: "#b3de69"
-eta_1_z:
+eta_geo_1:
   name: "$\\eta_{1,\\mathrm{geo}}$"
   line: "-."
   color: "#bebada"
-eta_0_z:
+eta_geo_0:
   name: "$\\eta_{0,\\mathrm{geo}}$"
   line: "-."
   color: "#fccde5"

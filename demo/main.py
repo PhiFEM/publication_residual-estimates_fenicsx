@@ -14,13 +14,12 @@ from basix.ufl import element, mixed_element
 from meshtagsplot import plot_mesh_tags
 from mpi4py import MPI
 from phifem.mesh_scripts import compute_tags_measures
-from plots import plot_mesh, plot_scalar, plot_tags
 from utils import (
     compute_boundary_local_estimators,
     marking,
-    phifem_direct_solve,
     phifem_dual_solve,
     residual_estimation,
+    save_function,
     write_log,
 )
 
@@ -112,14 +111,11 @@ stab_coef = parameters["stabilization_coefficient"]
 coefs = {"penalization": pen_coef, "stabilization": stab_coef}
 dorfler_param = parameters["marking_parameter"]
 bbox = parameters["bbox"]
-box_mode = parameters["mesh_type"] == "bg"
 refinement = parameters["refinement"]
 boundary_correction = parameters["boundary_correction"]
 auxiliary_degree = parameters["auxiliary_degree"]
 discretize_levelset = parameters["discretize_levelset"]
 dirichlet_estimator = parameters["dirichlet_estimator"]
-
-dual = auxiliary_degree > -1
 
 # Create background mesh
 nx = int(np.abs(bbox[0][1] - bbox[0][0]) / initial_mesh_size / np.sqrt(2.0))
@@ -134,11 +130,11 @@ results = {
     "iteration": [],
     "dof": [],
     "estimator": [],
-    "eta_T": [],
-    "eta_E": [],
-    "eta_p": [],
-    "eta_1_z": [],
-    "eta_0_z": [],
+    "eta_r": [],
+    "eta_J": [],
+    "eta_BC": [],
+    "eta_geo_1": [],
+    "eta_geo_0": [],
 }
 
 num_dof = 0
@@ -155,21 +151,10 @@ while num_dof < max_dof:
         x_ufl = ufl.SpatialCoordinate(mesh)
         detection_levelset = generate_detection_levelset(ufl)(x_ufl)
     write_log(prefix + "Computation of mesh tags")
-    if box_mode:
-        cells_tags, facets_tags, _, ds, _, _ = compute_tags_measures(
-            mesh, detection_levelset, detection_degree, box_mode=box_mode
-        )
-    else:
-        cells_tags, facets_tags, mesh, _, _, _ = compute_tags_measures(
-            mesh, detection_levelset, detection_degree, box_mode=box_mode
-        )
-        ds = ufl.Measure("ds", domain=mesh)
-    plot_mesh(
-        mesh,
-        os.path.join(meshes_dir, f"mesh_{str(i).zfill(2)}"),
-        wireframe=True,
-        linewidth=1.5,
+    cells_tags, facets_tags, _, ds, _, _ = compute_tags_measures(
+        mesh, detection_levelset, detection_degree, box_mode=True
     )
+
     if plot:
         write_log(prefix + "Plot mesh tags")
         leg_dict = {1: "inside", 2: "cut", 3: "outside"}
@@ -191,13 +176,6 @@ while num_dof < max_dof:
             bbox_inches="tight",
             dpi=500,
         )
-        plot_tags(
-            mesh,
-            cells_tags,
-            os.path.join(tags_dir, f"cells_tags_{str(i).zfill(2)}"),
-            annotations=leg_dict,
-            line_width=5.0,
-        )
         leg_dict = {1: "inside", 2: "cut", 3: "inside boundary", 4: "outside boundary"}
         fig = plt.figure()
         ax = fig.subplots()
@@ -214,13 +192,6 @@ while num_dof < max_dof:
             bbox_inches="tight",
             dpi=500,
         )
-        plot_tags(
-            mesh,
-            facets_tags,
-            os.path.join(tags_dir, f"facets_tags_{str(i).zfill(2)}"),
-            line_width=8.0,
-            annotations=leg_dict,
-        )
     results["iteration"].append(i)
 
     dx = ufl.Measure("dx", domain=mesh, subdomain_data=cells_tags)
@@ -232,16 +203,11 @@ while num_dof < max_dof:
     n = ufl.FacetNormal(mesh)
 
     fe_element = element("Lagrange", cell_name, fe_degree)
-    if dual:
-        aux_element = element("DG", cell_name, auxiliary_degree)
-        mxd_element = mixed_element([fe_element, aux_element])
-        mixed_space = dfx.fem.functionspace(mesh, mxd_element)
-        fe_space = dfx.fem.functionspace(mesh, fe_element)
-        aux_space = dfx.fem.functionspace(mesh, aux_element)
-    else:
-        mixed_space = dfx.fem.functionspace(mesh, fe_element)
-        solution_element = element("Lagrange", cell_name, solution_degree)
-        solution_space = dfx.fem.functionspace(mesh, solution_element)
+    aux_element = element("Lagrange", cell_name, auxiliary_degree)
+    mxd_element = mixed_element([fe_element, aux_element])
+    mixed_space = dfx.fem.functionspace(mesh, mxd_element)
+    fe_space = dfx.fem.functionspace(mesh, fe_element)
+    aux_space = dfx.fem.functionspace(mesh, aux_element)
 
     dg0_element = element("DG", cell_name, 0)
     dg0_space = dfx.fem.functionspace(mesh, dg0_element)
@@ -265,20 +231,15 @@ while num_dof < max_dof:
     levelset = generate_levelset(np)
     phih = dfx.fem.Function(levelset_space)
 
-    if dual:
-        phih.interpolate(levelset, cells_tags.find(2))
-        phih_plot = dfx.fem.Function(levelset_space)
-        phih_plot.interpolate(levelset)
-    else:
-        phih.interpolate(levelset)
-        phih_plot = phih
+    phih.interpolate(levelset, cells_tags.find(2))
+    phih_plot = dfx.fem.Function(levelset_space)
+    phih_plot.interpolate(levelset)
 
     adios4dolfinx.write_function(checkpoint_file, phih_plot, name="levelset")
-    plot_scalar(phih_plot, os.path.join(levelsets_dir, f"levelset_{str(i).zfill(2)}"))
-    plot_scalar(
+    save_function(phih_plot, os.path.join(levelsets_dir, f"levelset_{str(i).zfill(2)}"))
+    save_function(
         phih_plot,
         os.path.join(levelsets_dir, f"levelset_{str(i).zfill(2)}"),
-        warp_by_scalar=True,
     )
 
     u_space = dfx.fem.functionspace(mesh, fe_element)
@@ -290,17 +251,15 @@ while num_dof < max_dof:
         fh.interpolate(source_term)
         gh = dfx.fem.Function(u_space)
         gh.interpolate(dirichlet_data)
-        plot_scalar(fh, os.path.join(data_dir, f"source_term_{str(i).zfill(2)}"))
-        plot_scalar(gh, os.path.join(data_dir, f"dirichlet_data_{str(i).zfill(2)}"))
-        plot_scalar(
+        save_function(fh, os.path.join(data_dir, f"source_term_{str(i).zfill(2)}"))
+        save_function(gh, os.path.join(data_dir, f"dirichlet_data_{str(i).zfill(2)}"))
+        save_function(
             fh,
             os.path.join(data_dir, f"source_term_{str(i).zfill(2)}"),
-            warp_by_scalar=True,
         )
-        plot_scalar(
+        save_function(
             gh,
             os.path.join(data_dir, f"dirichlet_data_{str(i).zfill(2)}"),
-            warp_by_scalar=True,
         )
     else:
         x = ufl.SpatialCoordinate(mesh)
@@ -309,32 +268,24 @@ while num_dof < max_dof:
         gh = exact_solution
 
     write_log(prefix + "phiFEM solve.")
-    if dual:
-        solution_u, solution_p = phifem_dual_solve(
-            mixed_space, fh, gh, phih, measures, coefs
-        )
-    else:
-        spaces = {"primal": mixed_space, "solution": solution_space}
-        solution_u, solution_w = phifem_direct_solve(
-            spaces, fh, gh, phih, measures, coefs
-        )
+    solution_u, solution_p = phifem_dual_solve(
+        mixed_space, fh, gh, phih, measures, coefs
+    )
 
-    plot_scalar(
+    save_function(
         solution_u, os.path.join(solutions_dir, f"solution_u_{str(i).zfill(2)}")
     )
-    plot_scalar(
+    save_function(
         solution_u,
         os.path.join(solutions_dir, f"solution_u_{str(i).zfill(2)}"),
-        warp_by_scalar=True,
     )
 
-    plot_scalar(
+    save_function(
         solution_p, os.path.join(solutions_dir, f"solution_p_{str(i).zfill(2)}")
     )
-    # plot_scalar(
+    # save_function(
     #     solution_p,
     #     os.path.join(solutions_dir, f"solution_p_{str(i).zfill(2)}"),
-    #     warp_by_scalar=True,
     # )
 
     adios4dolfinx.write_meshtags(
@@ -348,42 +299,27 @@ while num_dof < max_dof:
 
     # Residual error estimation
     write_log(prefix + "Residual estimation.")
-    if dual:
-        eta_dict = residual_estimation(
-            dg0_space,
-            solution_u,
-            fh,
-            gh,
-            {"dx": dx((1, 2)), "dS": dS((1, 2))},
-            coefs=coefs,
-            phih=phih,
-            solution_p=solution_p,
-            dirichlet_estimator=dirichlet_estimator,
-        )
-        if not dirichlet_estimator:
-            results["eta_p"].append(np.nan)
-    else:
-        eta_dict = residual_estimation(
-            dg0_space,
-            solution_u,
-            fh,
-            gh,
-            {"dx": dx((1, 2)), "dS": dS((1, 2))},
-            coefs=coefs,
-            phih=phih,
-        )
-        results["eta_p"].append(np.nan)
+    eta_dict = residual_estimation(
+        dg0_space,
+        solution_u,
+        fh,
+        gh,
+        {"dx": dx((1, 2)), "dS": dS((1, 2))},
+        coefs=coefs,
+        phih=phih,
+        solution_p=solution_p,
+        dirichlet_estimator=dirichlet_estimator,
+    )
+    if not dirichlet_estimator:
+        results["eta_BC"].append(np.nan)
 
     if boundary_correction:
-        if dual:
-            solution = solution_p
-        else:
-            solution = solution_w
+        solution = solution_p
 
         write_log(prefix + "Computation boundary estimator.")
-        eta_dict["eta_1_z"], eta_dict["eta_0_z"], parent_cells_tags, fine_mesh = (
+        eta_dict["eta_geo_1"], eta_dict["eta_geo_0"], parent_cells_tags, fine_mesh = (
             compute_boundary_local_estimators(
-                mesh, solution, levelset, phih, cells_tags, facets_tags, dual=dual
+                mesh, solution, levelset, phih, cells_tags, facets_tags, dual=True
             )
         )
         if plot:
@@ -405,27 +341,20 @@ while num_dof < max_dof:
                 bbox_inches="tight",
                 dpi=500,
             )
-            plot_tags(
-                fine_mesh,
-                parent_cells_tags,
-                os.path.join(tags_dir, f"parent_cells_tags_{str(i).zfill(2)}"),
-                line_width=5.0,
-                annotations=leg_dict,
-            )
     else:
-        results["eta_1_z"].append(np.nan)
-        results["eta_0_z"].append(np.nan)
+        results["eta_geo_1"].append(np.nan)
+        results["eta_geo_0"].append(np.nan)
 
     est_h = dfx.fem.Function(dg0_space)
     for name, eta in eta_dict.items():
-        plot_scalar(eta, os.path.join(etas_dir, name + "_" + str(i).zfill(2)))
+        save_function(eta, os.path.join(etas_dir, name + "_" + str(i).zfill(2)))
 
         est_h.x.array[:] += eta.x.array[:]
         results[name].append(np.sqrt(eta.x.array.sum()))
 
     results["estimator"].append(np.sqrt(est_h.x.array.sum()))
 
-    plot_scalar(est_h, os.path.join(estimators_dir, f"estimator_{str(i).zfill(2)}"))
+    save_function(est_h, os.path.join(estimators_dir, f"estimator_{str(i).zfill(2)}"))
 
     df = pl.DataFrame(results)
     header = f"======================================================================================================\n{prefix}\n======================================================================================================"

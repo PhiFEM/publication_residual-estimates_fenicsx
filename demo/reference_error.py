@@ -15,7 +15,6 @@ from mpi4py import MPI
 
 sys.path.append("../")
 
-from plots import plot_scalar
 from utils import (
     cell_diameter,
     compute_dirichlet_oscillations,
@@ -55,6 +54,7 @@ dirs = [
     checkpoint_dir,
     errors_dir,
 ]
+
 if os.path.isdir(errors_dir):
     shutil.rmtree(errors_dir)
     os.mkdir(errors_dir)
@@ -293,11 +293,6 @@ for i in range(iterations_num):
         solution_u_2_ref, reference_solution, ref_dg0_space, dg0_space
     )
 
-    if coarse_h10_norm is not None:
-        plot_scalar(
-            coarse_h10_norm, os.path.join(errors_dir, f"h10_error_{str(i).zfill(2)}")
-        )
-
     with XDMFFile(
         reference_mesh.comm, os.path.join(errors_dir, "ref_h10_error.xdmf"), "w"
     ) as of:
@@ -308,20 +303,6 @@ for i in range(iterations_num):
     results["error"][i] = np.sqrt(h10_err_sqd)
 
     if phifem:
-        plot_scalar(
-            dg1_solution_p_2_ref_dg1,
-            os.path.join(errors_dir, f"ref_solution_p_{str(i).zfill(2)}"),
-        )
-        plot_scalar(
-            coarse_levelset_2_ref,
-            os.path.join(errors_dir, f"ref_levelset_{str(i).zfill(2)}"),
-        )
-        plot_scalar(
-            dg0_coarse_h_T_2_ref,
-            os.path.join(errors_dir, f"ref_coarse_mesh_h_T_{str(i).zfill(2)}"),
-            xdmf=True,
-        )
-
         write_log(prefix + "Compute L2 error p.")
         ref_l2_p_err = compute_l2_error_p(
             dg1_solution_p_2_ref_dg1,
@@ -341,9 +322,6 @@ for i in range(iterations_num):
 
         assert not np.any(np.isnan(ref_l2_p_err.x.array)), (
             "ref_l2_p_err.x.array contains NaNs."
-        )
-        plot_scalar(
-            ref_l2_p_err, os.path.join(errors_dir, f"l2_p_err_{str(i).zfill(2)}")
         )
         l2_p_err_sqd = ref_l2_p_err.x.array.sum()
 

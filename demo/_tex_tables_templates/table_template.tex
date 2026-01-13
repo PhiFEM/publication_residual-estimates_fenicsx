@@ -3,10 +3,10 @@
 \begin{tabular}{r c c c c c c c c}
 \toprule
 \textbf{Scheme}                       & \textbf{Estimator}         & $\bm{|e|_{1,\Omega}}$  & $\bmtvert \bm{E} \bmtvert_{\bm{\Omega}}$ & $\bm{\eta_r}$          & $\bm{\eta_J}$          & $\bm{\eta_{\mathrm{BC}}}$ & $\bm{\eta_{0,\mathrm{geo}}}$ & $\bm{\eta_{1,\mathrm{geo}}}$ \\ \midrule
-\textbf{FEM,} $\bm{\eta_1}$           & [fem-estimator]            & [fem-error]            & $\varnothing$                            & [fem-eta_T]            & [fem-eta_E]            & $\varnothing$             & $\varnothing$                & $\varnothing$                \\ \midrule
-\textbf{$\varphi$-FEM,} $\bm{\eta}$   & [phifem-dir-bdy-estimator] & [phifem-dir-bdy-error] & [phifem-dir-bdy-total_error]             & [phifem-dir-bdy-eta_T] & [phifem-dir-bdy-eta_E] & [phifem-dir-bdy-eta_p]    & [phifem-dir-bdy-eta_0_z]     & [phifem-dir-bdy-eta_1_z]     \\ \midrule
-\textbf{$\varphi$-FEM,} $\bm{\eta_1}$ & [phifem-estimator]         & [phifem-error]         & [phifem-total_error]                     & [phifem-eta_T]         & [phifem-eta_E]         & $\varnothing$             & $\varnothing$                & $\varnothing$                \\ \midrule
-\textbf{$\varphi$-FEM,} $\bm{\eta_2}$ & [phifem-bdy-estimator]     & [phifem-bdy-error]     & [phifem-bdy-total_error]                 & [phifem-bdy-eta_T]     & [phifem-bdy-eta_E]     & $\varnothing$             & [phifem-bdy-eta_0_z]         & [phifem-bdy-eta_1_z]         \\ \bottomrule 
+\textbf{FEM,} $\bm{\eta_1}$           & [fem-estimator]            & [fem-error]            & $\varnothing$                            & [fem-eta_r]            & [fem-eta_J]            & $\varnothing$             & $\varnothing$                & $\varnothing$                \\ \midrule
+\textbf{$\varphi$-FEM,} $\bm{\eta}$   & [phifem-bc-geo-estimator] & [phifem-bc-geo-error] & [phifem-bc-geo-total_error]             & [phifem-bc-geo-eta_r] & [phifem-bc-geo-eta_J] & [phifem-bc-geo-eta_BC]    & [phifem-bc-geo-eta_geo_0]     & [phifem-bc-geo-eta_geo_1]     \\ \midrule
+\textbf{$\varphi$-FEM,} $\bm{\eta_1}$ & [phifem-estimator]         & [phifem-error]         & [phifem-total_error]                     & [phifem-eta_r]         & [phifem-eta_J]         & $\varnothing$             & $\varnothing$                & $\varnothing$                \\ \midrule
+\textbf{$\varphi$-FEM,} $\bm{\eta_2}$ & [phifem-geo-estimator]     & [phifem-geo-error]     & [phifem-geo-total_error]                 & [phifem-geo-eta_r]     & [phifem-geo-eta_J]     & $\varnothing$             & [phifem-geo-eta_geo_0]         & [phifem-geo-eta_geo_1]         \\ \bottomrule 
 \end{tabular}
 \caption{}
 \label{tab:}
