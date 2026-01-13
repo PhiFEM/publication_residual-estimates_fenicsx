@@ -8,13 +8,13 @@ auxiliary_degree: 1
 levelset_degree: 1
 boundary_detection_degree: 1
 solution_degree: 1
-boundary_correction: false
+boundary_correction: true
 dirichlet_estimator: false
 penalization_coefficient: 1.0
 stabilization_coefficient: 1.0
 marking_parameter: 0.3
 discretize_levelset: false
 bbox:
-- [-0.5, 1.]
-- [-0.75, 1.]
-name: "$\\varphi$-FEM (no BC,geo)"
+- [-3.25, 1.25]
+- [-1.25, 1.75]
+name: "$\\varphi$-FEM (no BC)"

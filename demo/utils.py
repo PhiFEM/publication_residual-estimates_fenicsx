@@ -568,6 +568,7 @@ def compute_l2_error(
         coarse_h_T_2_ref ** (-2)
         * coarse_cut_indicator_2_ref
         * ufl.inner(ref_error, ref_error)
+        * ref_v0
         * ufl.dx(metadata={"quadrature_degree": 20})
     )
     l2_norm_form = dfx.fem.form(l2_norm_int)
@@ -601,46 +602,98 @@ def compute_phi_p_error(
     ref_solution,
     ref_g,
     ref_dg0_space,
+    dg0_space,
     coarse_levelset_2_ref,
     ref_levelset,
+    coarse_h_T_2_ref,
     coarse_cut_indicator_2_ref,
 ):
-    h_T_reference_p = ref_solution - ref_g
+    ref_p = ref_solution - ref_g
+    phi_p_error = ref_p * ref_levelset - coarse_solution_p_2_ref * coarse_levelset_2_ref
+
+    ref_v0 = ufl.TestFunction(ref_dg0_space)
+
+    phi_p_norm_int = (
+        coarse_h_T_2_ref ** (-2)
+        * coarse_cut_indicator_2_ref
+        * ufl.inner(phi_p_error, phi_p_error)
+        * ref_v0
+        * ufl.dx(metadata={"quadrature_degree": 20})
+    )
+    phi_p_norm_form = dfx.fem.form(phi_p_norm_int)
+    phi_p_err_vec = dfx.fem.assemble_vector(phi_p_norm_form)
+
+    ref_phi_p_norm = dfx.fem.Function(ref_dg0_space)
+    # We replace eventual NaN values with zero.
+    ref_phi_p_norm.x.array[:] = np.nan_to_num(
+        phi_p_err_vec.array[:], copy=False, nan=0.0
+    )
+
+    coarse_phi_p_norm = None
+    try:
+        coarse_mesh = dg0_space.mesh
+        cdim = coarse_mesh.geometry.dim
+        num_cells = coarse_mesh.topology.index_map(cdim).size_global
+        all_cells = np.arange(num_cells)
+        nmm_ref_space2coarse_space = dfx.fem.create_interpolation_data(
+            dg0_space, ref_dg0_space, all_cells, padding=1.0e-20
+        )
+        coarse_phi_p_norm = dfx.fem.Function(dg0_space)
+        coarse_phi_p_norm.interpolate_nonmatching(
+            ref_phi_p_norm, all_cells, nmm_ref_space2coarse_space
+        )
+    except RuntimeError:
+        print("Failed to interpolate l2_norm to coarse space.")
+        pass
 
     return ref_phi_p_norm, coarse_phi_p_norm
 
 
-def compute_l2_error_p(
+def compute_phi_error(
     coarse_solution_p_2_ref,
-    ref_solution,
-    ref_g,
+    ref_levelset,
     coarse_levelset_2_ref,
     coarse_h_T_2_ref,
     coarse_cut_indicator_2_ref,
     ref_dg0_space,
+    dg0_space,
 ):
-    h_T_reference_p = ref_solution - ref_g
-
-    p_diff = (
-        h_T_reference_p
-        - coarse_solution_p_2_ref * coarse_levelset_2_ref / coarse_h_T_2_ref
-    )
+    phi_diff = (ref_levelset - coarse_levelset_2_ref) * coarse_solution_p_2_ref
 
     ref_v0 = ufl.TestFunction(ref_dg0_space)
-    l2_norm_p_int = (
+    l2_norm_phi_int = (
         coarse_h_T_2_ref ** (-2)
-        * ufl.inner(p_diff, p_diff)
+        * ufl.inner(phi_diff, phi_diff)
         * coarse_cut_indicator_2_ref
         * ref_v0
         * ufl.dx(metadata={"quadrature_degree": 20})
     )
-    l2_norm_p_form = dfx.fem.form(l2_norm_p_int)
-    l2_p_err_vec = dfx.fem.assemble_vector(l2_norm_p_form)
+    l2_norm_phi_form = dfx.fem.form(l2_norm_phi_int)
+    l2_phi_err_vec = dfx.fem.assemble_vector(l2_norm_phi_form)
 
-    ref_l2_p_err = dfx.fem.Function(ref_dg0_space)
+    ref_l2_phi_norm = dfx.fem.Function(ref_dg0_space)
     # We replace eventual NaN values with zero.
-    ref_l2_p_err.x.array[:] = np.nan_to_num(l2_p_err_vec.array[:], copy=False, nan=0.0)
-    return ref_l2_p_err
+    ref_l2_phi_norm.x.array[:] = np.nan_to_num(
+        l2_phi_err_vec.array[:], copy=False, nan=0.0
+    )
+
+    coarse_l2_phi_norm = None
+    try:
+        coarse_mesh = dg0_space.mesh
+        cdim = coarse_mesh.geometry.dim
+        num_cells = coarse_mesh.topology.index_map(cdim).size_global
+        all_cells = np.arange(num_cells)
+        nmm_ref_space2coarse_space = dfx.fem.create_interpolation_data(
+            dg0_space, ref_dg0_space, all_cells, padding=1.0e-20
+        )
+        coarse_l2_phi_norm = dfx.fem.Function(dg0_space)
+        coarse_l2_phi_norm.interpolate_nonmatching(
+            ref_l2_phi_norm, all_cells, nmm_ref_space2coarse_space
+        )
+    except RuntimeError:
+        print("Failed to interpolate l2_norm to coarse space.")
+        pass
+    return ref_l2_phi_norm, coarse_l2_phi_norm
 
 
 def compute_source_term_oscillations(

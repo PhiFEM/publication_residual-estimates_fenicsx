@@ -275,10 +275,6 @@ while num_dof < max_dof:
     save_function(
         solution_u, os.path.join(solutions_dir, f"solution_u_{str(i).zfill(2)}")
     )
-    save_function(
-        solution_u,
-        os.path.join(solutions_dir, f"solution_u_{str(i).zfill(2)}"),
-    )
 
     save_function(
         solution_p, os.path.join(solutions_dir, f"solution_p_{str(i).zfill(2)}")

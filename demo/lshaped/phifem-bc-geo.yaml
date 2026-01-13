@@ -1,14 +1,14 @@
 # Drop test case
-initial_mesh_size: 0.25
-maximum_dof: 2.5e5
+initial_mesh_size: 0.5
+maximum_dof: 1e5
 refinement: "adap"
-mesh_type: "sub"
+mesh_type: "bg"
 finite_element_degree: 1
 auxiliary_degree: 1
 levelset_degree: 1
-boundary_detection_degree: 30
+boundary_detection_degree: 1
 solution_degree: 1
-boundary_correction: false
+boundary_correction: true
 dirichlet_estimator: true
 penalization_coefficient: 1.0
 stabilization_coefficient: 1.0
@@ -17,4 +17,4 @@ discretize_levelset: false
 bbox:
 - [-0.5, 1.]
 - [-0.75, 1.]
-name: "$\\varphi$-FEM (no geo)"
+name: "$\\varphi$-FEM"

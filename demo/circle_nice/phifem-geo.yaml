@@ -1,20 +1,20 @@
-# Drop test case
-initial_mesh_size: 0.05
-maximum_dof: 1e3
+# Circle with smooth boundary condition test case
+initial_mesh_size: 0.1
+maximum_dof: 1e5
 refinement: "adap"
-mesh_type: "sub"
+mesh_type: "bg"
 finite_element_degree: 1
 auxiliary_degree: 1
 levelset_degree: 1
-boundary_detection_degree: 30
+boundary_detection_degree: 1
 solution_degree: 1
-boundary_correction: false
+boundary_correction: true
 dirichlet_estimator: false
 penalization_coefficient: 1.0
 stabilization_coefficient: 1.0
 marking_parameter: 0.3
 discretize_levelset: false
 bbox:
-- [-0.5, 1.]
-- [-0.75, 1.]
-name: "$\\varphi$-FEM (no BC,geo)"
+- [-1.5, 1.5]
+- [-1.5, 1.5]
+name: "$\\varphi$-FEM (no BC)"
