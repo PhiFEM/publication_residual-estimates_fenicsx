@@ -283,10 +283,6 @@ while num_dof < max_dof:
     save_function(
         solution_p, os.path.join(solutions_dir, f"solution_p_{str(i).zfill(2)}")
     )
-    # save_function(
-    #     solution_p,
-    #     os.path.join(solutions_dir, f"solution_p_{str(i).zfill(2)}"),
-    # )
 
     adios4dolfinx.write_meshtags(
         checkpoint_file, mesh, cells_tags, meshtag_name="cells_tags"
