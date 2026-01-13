@@ -297,11 +297,7 @@ def phifem_dual_solve(mixed_space, fh, gh, phih, measures, coefs):
     )
     stabilization_cells = stab_coef * h_T**2 * ufl.inner(delta(uh), delta(vh))
 
-    penalization = (
-        pen_coef
-        * h_T ** (-2)
-        * ufl.inner(uh - h_T ** (-1) * ph * phih, vh - h_T ** (-1) * qh * phih)
-    )
+    penalization = pen_coef * h_T ** (-2) * ufl.inner(uh - ph * phih, vh - qh * phih)
 
     a = (
         stiffness * dx((1, 2))
@@ -313,9 +309,7 @@ def phifem_dual_solve(mixed_space, fh, gh, phih, measures, coefs):
 
     # Linear form
     rhs = ufl.inner(fh, vh)
-    penalization_rhs = (
-        pen_coef * h_T ** (-2) * ufl.inner(gh, vh - h_T ** (-1) * qh * phih)
-    )
+    penalization_rhs = pen_coef * h_T ** (-2) * ufl.inner(gh, vh - qh * phih)
     stabilization_rhs = stab_coef * h_T**2 * ufl.inner(fh, delta(vh))
 
     L = rhs * dx((1, 2)) + penalization_rhs * dx(2) - stabilization_rhs * dx(2)
@@ -446,30 +440,30 @@ def residual_estimation(
 
     w0 = ufl.TestFunction(dg0_space)
 
-    eta_T = h_T**2 * ufl.inner(ufl.inner(rh, rh), w0) * dx_est
-    eta_E = ufl.avg(h_T) * ufl.inner(ufl.inner(Jh, Jh), ufl.avg(w0)) * dS_est
+    eta_r = h_T**2 * ufl.inner(ufl.inner(rh, rh), w0) * dx_est
+    eta_J = ufl.avg(h_T) * ufl.inner(ufl.inner(Jh, Jh), ufl.avg(w0)) * dS_est
 
-    eta_dict = {"eta_T": eta_T, "eta_E": eta_E}
+    eta_dict = {"eta_r": eta_r, "eta_J": eta_J}
 
     if dual and dirichlet_estimator:
         if phih is None:
             raise ValueError(
-                "You must pass a discrete levelset in order to compute eta_p."
+                "You must pass a discrete levelset in order to compute eta_BC."
             )
         pen_coef = coefs["penalization"]
-        eta_p = (
+        eta_BC = (
             pen_coef
             * (
                 h_T ** (-2)
                 * ufl.inner(
-                    solution_u - h_T ** (-1) * solution_p * phih - gh,
-                    solution_u - h_T ** (-1) * solution_p * phih - gh,
+                    solution_u - solution_p * phih - gh,
+                    solution_u - solution_p * phih - gh,
                 )
                 * w0
             )
             * dx(2)
         )
-        eta_dict["eta_p"] = eta_p
+        eta_dict["eta_BC"] = eta_BC
 
     for name, e in eta_dict.items():
         e_form = dfx.fem.form(e)
@@ -557,6 +551,63 @@ def compute_h10_error(solution_u_2_ref, reference_solution, ref_dg0_space, dg0_s
         print("Failed to interpolate h10_norm to coarse space.")
         pass
     return ref_h10_norm, coarse_h10_norm
+
+
+def compute_l2_error(
+    solution_u_2_ref,
+    reference_solution,
+    ref_dg0_space,
+    dg0_space,
+    coarse_h_T_2_ref,
+    coarse_cut_indicator_2_ref,
+):
+    ref_error = solution_u_2_ref - reference_solution
+    ref_v0 = ufl.TestFunction(ref_dg0_space)
+
+    l2_norm_int = (
+        coarse_h_T_2_ref ** (-2)
+        * coarse_cut_indicator_2_ref
+        * ufl.inner(ref_error, ref_error)
+        * ufl.dx(metadata={"quadrature_degree": 20})
+    )
+    l2_norm_form = dfx.fem.form(l2_norm_int)
+    l2_err_vec = dfx.fem.assemble_vector(l2_norm_form)
+
+    ref_l2_norm = dfx.fem.Function(ref_dg0_space)
+    # We replace eventual NaN values with zero.
+    ref_l2_norm.x.array[:] = np.nan_to_num(l2_err_vec.array[:], copy=False, nan=0.0)
+
+    coarse_l2_norm = None
+    try:
+        coarse_mesh = dg0_space.mesh
+        cdim = coarse_mesh.geometry.dim
+        num_cells = coarse_mesh.topology.index_map(cdim).size_global
+        all_cells = np.arange(num_cells)
+        nmm_ref_space2coarse_space = dfx.fem.create_interpolation_data(
+            dg0_space, ref_dg0_space, all_cells, padding=1.0e-20
+        )
+        coarse_l2_norm = dfx.fem.Function(dg0_space)
+        coarse_l2_norm.interpolate_nonmatching(
+            ref_l2_norm, all_cells, nmm_ref_space2coarse_space
+        )
+    except RuntimeError:
+        print("Failed to interpolate l2_norm to coarse space.")
+        pass
+    return ref_l2_norm, coarse_l2_norm
+
+
+def compute_phi_p_error(
+    coarse_solution_p_2_ref,
+    ref_solution,
+    ref_g,
+    ref_dg0_space,
+    coarse_levelset_2_ref,
+    ref_levelset,
+    coarse_cut_indicator_2_ref,
+):
+    h_T_reference_p = ref_solution - ref_g
+
+    return ref_phi_p_norm, coarse_phi_p_norm
 
 
 def compute_l2_error_p(
