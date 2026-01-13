@@ -297,11 +297,7 @@ def phifem_dual_solve(mixed_space, fh, gh, phih, measures, coefs):
     )
     stabilization_cells = stab_coef * h_T**2 * ufl.inner(delta(uh), delta(vh))
 
-    penalization = (
-        pen_coef
-        * h_T ** (-2)
-        * ufl.inner(uh - h_T ** (-1) * ph * phih, vh - h_T ** (-1) * qh * phih)
-    )
+    penalization = pen_coef * h_T ** (-2) * ufl.inner(uh - ph * phih, vh - qh * phih)
 
     a = (
         stiffness * dx((1, 2))
@@ -313,9 +309,7 @@ def phifem_dual_solve(mixed_space, fh, gh, phih, measures, coefs):
 
     # Linear form
     rhs = ufl.inner(fh, vh)
-    penalization_rhs = (
-        pen_coef * h_T ** (-2) * ufl.inner(gh, vh - h_T ** (-1) * qh * phih)
-    )
+    penalization_rhs = pen_coef * h_T ** (-2) * ufl.inner(gh, vh - qh * phih)
     stabilization_rhs = stab_coef * h_T**2 * ufl.inner(fh, delta(vh))
 
     L = rhs * dx((1, 2)) + penalization_rhs * dx(2) - stabilization_rhs * dx(2)
@@ -462,8 +456,8 @@ def residual_estimation(
             * (
                 h_T ** (-2)
                 * ufl.inner(
-                    solution_u - h_T ** (-1) * solution_p * phih - gh,
-                    solution_u - h_T ** (-1) * solution_p * phih - gh,
+                    solution_u - solution_p * phih - gh,
+                    solution_u - solution_p * phih - gh,
                 )
                 * w0
             )
