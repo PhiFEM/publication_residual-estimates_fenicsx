@@ -173,13 +173,7 @@ if phifem:
 # Allocate memory for results
 results = pl.read_csv(os.path.join(output_dir, "results.csv")).to_dict()
 results["h10_error"] = [np.nan] * iterations_num
-results["l2_p_error"] = [np.nan] * iterations_num
 results["triple_norm_error"] = [np.nan] * iterations_num
-results["source_term_osc"] = [np.nan] * iterations_num
-results["dirichlet_data_osc"] = [np.nan] * iterations_num
-results["total_error"] = [np.nan] * iterations_num
-results["xi_h10"] = [np.nan] * iterations_num
-results["xi_l2"] = [np.nan] * iterations_num
 
 for i in range(iterations_num):
     prefix = f"REFERENCE ERROR | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
@@ -298,10 +292,12 @@ for i in range(iterations_num):
     )
 
     with XDMFFile(
-        reference_mesh.comm, os.path.join(errors_dir, "ref_h10_error.xdmf"), "w"
+        reference_mesh.comm,
+        os.path.join(errors_dir, f"h10_error_{str(i).zfill(2)}.xdmf"),
+        "w",
     ) as of:
-        of.write_mesh(reference_mesh)
-        of.write_function(ref_h10_norm)
+        of.write_mesh(mesh)
+        of.write_function(coarse_h10_norm)
 
     h10_err_sqd = ref_h10_norm.x.array.sum()
     results["h10_error"][i] = np.sqrt(h10_err_sqd)
@@ -320,10 +316,12 @@ for i in range(iterations_num):
         )
 
         with XDMFFile(
-            reference_mesh.comm, os.path.join(errors_dir, "ref_l2_error.xdmf"), "w"
+            reference_mesh.comm,
+            os.path.join(errors_dir, f"l2_error_{str(i).zfill(2)}.xdmf"),
+            "w",
         ) as of:
-            of.write_mesh(reference_mesh)
-            of.write_function(ref_l2_norm)
+            of.write_mesh(mesh)
+            of.write_function(coarse_l2_norm)
 
         l2_err_sqd = ref_l2_norm.x.array.sum()
         triple_norm_err_sqd += l2_err_sqd
@@ -342,10 +340,12 @@ for i in range(iterations_num):
         )
 
         with XDMFFile(
-            reference_mesh.comm, os.path.join(errors_dir, "ref_l2_p_error.xdmf"), "w"
+            reference_mesh.comm,
+            os.path.join(errors_dir, f"phi_p_error_{str(i).zfill(2)}.xdmf"),
+            "w",
         ) as of:
-            of.write_mesh(reference_mesh)
-            of.write_function(ref_phi_p_norm)
+            of.write_mesh(mesh)
+            of.write_function(coarse_phi_p_norm)
 
         assert not np.any(np.isnan(ref_phi_p_norm.x.array)), (
             "ref_l2_p_err.x.array contains NaNs."
@@ -366,10 +366,12 @@ for i in range(iterations_num):
         )
 
         with XDMFFile(
-            reference_mesh.comm, os.path.join(errors_dir, "ref_l2_p_error.xdmf"), "w"
+            reference_mesh.comm,
+            os.path.join(errors_dir, f"phi_error_{str(i).zfill(2)}.xdmf"),
+            "w",
         ) as of:
-            of.write_mesh(reference_mesh)
-            of.write_function(ref_phi_norm)
+            of.write_mesh(mesh)
+            of.write_function(coarse_phi_norm)
 
         assert not np.any(np.isnan(ref_phi_norm.x.array)), (
             "ref_l2_p_err.x.array contains NaNs."
@@ -379,51 +381,6 @@ for i in range(iterations_num):
         triple_norm_err_sqd += phi_err_sqd
 
         results["triple_norm_error"][i] = np.sqrt(triple_norm_err_sqd)
-
-    # Source term oscillations estimation
-    # Dirichlet data oscillations estimation
-    if exact_solution_available:
-        x = ufl.SpatialCoordinate(mesh)
-        coarse_ref_solution = ref_solution(x)
-        fh = -ufl.div(ufl.grad(coarse_ref_solution))
-        gh = coarse_ref_solution
-        dirichlet_data = generate_exact_solution(np)
-    else:
-        fh = dfx.fem.Function(fe_space)
-        fh.interpolate(source_term)
-        dirichlet_data = generate_dirichlet_data(np)
-
-    gh = dfx.fem.Function(fe_space)
-    gh.interpolate(dirichlet_data)
-
-    """
-    ref_osc_f, coarse_osc_f = compute_source_term_oscillations(
-        fh,
-        ref_f,
-        dg0_coarse_h_T_2_ref,
-        ref_dg0_space,
-        dg0_space,
-        fe_space,
-        reference_space,
-    )
-
-    plot_scalar(
-        coarse_osc_f, os.path.join(errors_dir, f"source_term_osc_{str(i).zfill(2)}")
-    )
-    results["source_term_osc"][i] = np.sqrt(ref_osc_f.x.array.sum())
-
-    ref_osc_g, coarse_osc_g = compute_dirichlet_oscillations(
-        gh,
-        ref_g,
-        ref_dg0_space,
-        dg0_space,
-        dg0_cut_indicator_2_ref,
-        fe_space,
-        reference_space,
-    )
-
-    results["dirichlet_data_osc"][i] = np.sqrt(ref_osc_g.x.array.sum())
-    """
 
     df = pl.DataFrame(results)
     header = f"======================================================================================================\n{prefix}\n======================================================================================================"

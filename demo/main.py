@@ -41,6 +41,9 @@ plot = args.plot
 source_dir = os.path.join(parent_dir, demo)
 output_dir = os.path.join(source_dir, "output_" + parameters_name)
 
+if not os.path.isdir(output_dir):
+    os.mkdir(output_dir)
+
 checkpoint_dir = os.path.join(output_dir, "checkpoints")
 
 if os.path.isdir(checkpoint_dir):
