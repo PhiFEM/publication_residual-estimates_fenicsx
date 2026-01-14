@@ -503,27 +503,6 @@ def marking(est_h, dorfler_param):
     return facets_indices, cells_indices
 
 
-def compute_xi_h10_l2(solution_u_ref, g_ref, coarse_h_T, ref_dg0_space):
-    ref_space = solution_u_ref.function_space
-    xi_source_term = dfx.fem.Function(ref_space)
-    xi_dirichlet_data = dfx.fem.Function(ref_space)
-    xi_dirichlet_data.x.array[:] = solution_u_ref.x.array[:] - g_ref.x.array[:]
-    xi_ref = fem_solve(solution_u_ref.function_space, xi_source_term, xi_dirichlet_data)
-    ref_v0 = ufl.TestFunction(ref_dg0_space)
-    xi_ref_h10_int = ufl.inner(ufl.grad(xi_ref), ufl.grad(xi_ref)) * ref_v0 * ufl.dx
-    xi_ref_h10_form = dfx.fem.form(xi_ref_h10_int)
-    xi_ref_h10_vec = assemble_vector(xi_ref_h10_form)
-    xi_ref_h10 = dfx.fem.Function(ref_dg0_space)
-    xi_ref_h10.x.array[:] = xi_ref_h10_vec.array[:]
-
-    xi_ref_l2_int = coarse_h_T ** (-1) * ufl.inner(xi_ref, xi_ref) * ref_v0 * ufl.dx
-    xi_ref_l2_form = dfx.fem.form(xi_ref_l2_int)
-    xi_ref_l2_vec = assemble_vector(xi_ref_l2_form)
-    xi_ref_l2 = dfx.fem.Function(ref_dg0_space)
-    xi_ref_l2.x.array[:] = xi_ref_l2_vec.array[:]
-    return xi_ref_h10, xi_ref_l2
-
-
 def compute_h10_error(solution_u_2_ref, reference_solution, ref_dg0_space, dg0_space):
     grad_diff = ufl.grad(reference_solution - solution_u_2_ref)
     ref_v0 = ufl.TestFunction(ref_dg0_space)
