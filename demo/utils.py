@@ -69,6 +69,7 @@ def compute_parent_cells(coarse_mesh, fine_mesh, initial_parent_cells):
     return parent_cells
 
 
+<<<<<<< HEAD
 def compute_boundary_local_estimators(
     coarse_mesh,
     solution_p,
@@ -275,6 +276,8 @@ def phifem_direct_solve(spaces, fh, phih, measures, coefs):
     return solution_u, solution_w
 
 
+=======
+>>>>>>> f923c5e (Remove phifem_direct_solve method.)
 def phifem_dual_solve(mixed_space, fh, gh, phih, measures, coefs):
     dx, dS, ds = (measures["dx"], measures["dS"], measures["ds"])
     pen_coef, stab_coef = (coefs["penalization"], coefs["stabilization"])
