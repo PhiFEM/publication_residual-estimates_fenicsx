@@ -165,9 +165,10 @@ else:
 ref_g = dfx.fem.Function(reference_space)
 ref_g.interpolate(dirichlet_data)
 
-levelset = generate_levelset(np)
-reference_levelset = dfx.fem.Function(reference_levelset_space)
-reference_levelset.interpolate(levelset)
+if phifem:
+    levelset = generate_levelset(np)
+    reference_levelset = dfx.fem.Function(reference_levelset_space)
+    reference_levelset.interpolate(levelset)
 
 # Allocate memory for results
 results = pl.read_csv(os.path.join(output_dir, "results.csv")).to_dict()
