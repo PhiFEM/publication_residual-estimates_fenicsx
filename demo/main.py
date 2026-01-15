@@ -136,8 +136,7 @@ results = {
     "eta_r": [],
     "eta_J": [],
     "eta_BC": [],
-    "eta_geo_1": [],
-    "eta_geo_0": [],
+    "eta_geo": [],
 }
 
 num_dof = 0
@@ -312,7 +311,7 @@ while num_dof < max_dof:
         solution = solution_p
 
         write_log(prefix + "Computation boundary estimator.")
-        eta_dict["eta_geo_1"], eta_dict["eta_geo_0"], parent_cells_tags, fine_mesh = (
+        eta_dict["eta_geo"], parent_cells_tags, fine_mesh = (
             compute_boundary_local_estimators(
                 mesh, solution, levelset, phih, cells_tags, facets_tags, dual=True
             )
@@ -337,8 +336,7 @@ while num_dof < max_dof:
                 dpi=500,
             )
     else:
-        results["eta_geo_1"].append(np.nan)
-        results["eta_geo_0"].append(np.nan)
+        results["eta_geo"].append(np.nan)
 
     est_h = dfx.fem.Function(dg0_space)
     for name, eta in eta_dict.items():
