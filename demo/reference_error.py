@@ -361,6 +361,22 @@ for i in range(iterations_num):
             coarse_levelset_2_ref,
             dg0_coarse_h_T_2_ref,
             dg0_cut_indicator_2_ref,
+        )
+
+        with XDMFFile(
+            reference_mesh.comm, os.path.join(errors_dir, "ref_l2_error.xdmf"), "w"
+        ) as of:
+            of.write_mesh(reference_mesh)
+            of.write_function(ref_l2_norm)
+
+        l2_err_sqd = ref_l2_norm.x.array.sum()
+        triple_norm_err_sqd += l2_err_sqd
+
+        write_log(prefix + "Compute L2 phi p error.")
+        ref_phi_p_norm, coarse_phi_p_norm = compute_phi_p_error(
+            solution_p_2_ref,
+            reference_solution,
+            ref_g,
             ref_dg0_space,
             dg0_space,
         )
