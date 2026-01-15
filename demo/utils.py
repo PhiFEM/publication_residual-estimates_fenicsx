@@ -69,7 +69,6 @@ def compute_parent_cells(coarse_mesh, fine_mesh, initial_parent_cells):
     return parent_cells
 
 
-<<<<<<< HEAD
 def compute_boundary_local_estimators(
     coarse_mesh,
     solution_p,
@@ -80,29 +79,38 @@ def compute_boundary_local_estimators(
     dual=False,
     padding=1.0e-14,
 ):
-    facets_to_refine = np.union1d(facets_tags.find(2), facets_tags.find(3))
-    facets_to_refine = np.union1d(facets_to_refine, facets_tags.find(4))
-
     cdim = coarse_mesh.topology.dim
-    num_cells = coarse_mesh.topology.index_map(cdim).size_global
-    dummy_mesh = dfx.mesh.create_submesh(coarse_mesh, cdim, np.arange(num_cells))[0]
+    submesh, cmap = dfx.mesh.create_submesh(coarse_mesh, cdim, cells_tags.find(2))[:2]
+    submesh.topology.create_entities(cdim - 1)
+    fine_mesh, parent_cells = dfx.mesh.refine(
+        submesh, option=RefinementOption.parent_cell
+    )[:2]
 
+    # facets_to_refine = np.union1d(facets_tags.find(2), facets_tags.find(3))
+    # facets_to_refine = np.union1d(facets_to_refine, facets_tags.find(4))
+    #
+    # num_cells = coarse_mesh.topology.index_map(cdim).size_global
+    # dummy_mesh, cmap = dfx.mesh.create_submesh(coarse_mesh, cdim, np.arange(num_cells))[
+    # :2
+    # ]
+    #
     # Mark the cells to refine in the coarse mesh
-    dummy_mesh.topology.create_entities(dummy_mesh.topology.dim - 1)
-    fdim = cdim - 1
-    coarse_mesh.topology.create_connectivity(fdim, cdim)
-    f2c_connect_dummy = coarse_mesh.topology.connectivity(fdim, cdim)
-    f2c_map_dummy = _reshape_facets_map(f2c_connect_dummy)
-    cells_to_refine = f2c_map_dummy[facets_to_refine]
-    cells_to_refine = np.unique(cells_to_refine.reshape(-1))
+    # dummy_mesh.topology.create_entities(dummy_mesh.topology.dim - 1)
+    # fdim = cdim - 1
+    # coarse_mesh.topology.create_connectivity(fdim, cdim)
+    # f2c_connect_dummy = coarse_mesh.topology.connectivity(fdim, cdim)
+    # f2c_map_dummy = _reshape_facets_map(f2c_connect_dummy)
+    # cells_to_refine = f2c_map_dummy[facets_to_refine]
+    # cells_to_refine = np.unique(cells_to_refine.reshape(-1))
 
     # Mark the corresponding child cells of the refined cells in the fine mesh
-    fine_mesh, parent_cells, _ = dfx.mesh.refine(
-        dummy_mesh,
-        facets_to_refine,
-        option=RefinementOption.parent_cell,
-    )
-    parent_cells = compute_parent_cells(dummy_mesh, fine_mesh, parent_cells)
+    # fine_mesh, parent_cells, _ = dfx.mesh.refine(
+    # dummy_mesh,
+    # facets_to_refine,
+    # option=RefinementOption.parent_cell,
+    # )
+    parent_cells = compute_parent_cells(submesh, fine_mesh, parent_cells)
+
     fine_cells_tags = dfx.mesh.transfer_meshtag(cells_tags, fine_mesh, parent_cells)
 
     phih_space = phih.function_space
@@ -130,12 +138,12 @@ def compute_boundary_local_estimators(
 
     cell_name = fine_mesh.topology.cell_name()
     dg0_element = element("DG", cell_name, 0)
+    dg0_coarse_space = dfx.fem.functionspace(coarse_mesh, dg0_element)
     dg0_fine_space = dfx.fem.functionspace(fine_mesh, dg0_element)
 
-    dx = ufl.Measure("dx", domain=fine_mesh, subdomain_data=fine_cells_tags)
+    dx = ufl.Measure("dx", domain=fine_mesh)
     v0 = ufl.TestFunction(dg0_fine_space)
 
-    dg0_coarse_space = dfx.fem.functionspace(coarse_mesh, dg0_element)
     h_T_coarse = cell_diameter(dg0_coarse_space)
     h_T_fine = dfx.fem.Function(dg0_fine_space)
     nmm_dg0_coarse_space2dg0_fine_space = dfx.fem.create_interpolation_data(
@@ -156,20 +164,14 @@ def compute_boundary_local_estimators(
         measure_ind = (1, 2)
 
     # eta_{1,z}
-    h10_norm_correction = (
-        ufl.inner(grad_correction, grad_correction) * v0 * dx(measure_ind)
-    )
+    h10_norm_correction = ufl.inner(grad_correction, grad_correction) * v0 * dx
     h10_norm_correction_form = dfx.fem.form(h10_norm_correction)
     h10_norm_correction_vec = assemble_vector(h10_norm_correction_form)
 
-    h10_norm_dg0_fine = dfx.fem.Function(dg0_fine_space)
-    h10_norm_dg0_fine.x.array[:] = h10_norm_correction_vec.array[:]
-    h10_norm_vec_coarse = np.bincount(
-        parent_cells, weights=h10_norm_correction_vec.array[:]
-    )
-    dg0_coarse_space = dfx.fem.functionspace(coarse_mesh, dg0_element)
     h10_norm_dg0 = dfx.fem.Function(dg0_coarse_space)
-    h10_norm_dg0.x.array[:] = h10_norm_vec_coarse
+    h10_norm_dg0.x.array[cmap] = np.bincount(
+        cmap[parent_cells], weights=h10_norm_correction_vec.array[:]
+    )[cmap]
 
     # eta_{0,z}
     l2_norm_correction = (
@@ -183,14 +185,10 @@ def compute_boundary_local_estimators(
 
     l2_norm_dg0_fine = dfx.fem.Function(dg0_fine_space)
     l2_norm_dg0_fine.x.array[:] = l2_norm_correction_vec.array[:]
-    l2_norm_vec_coarse = np.bincount(
-        parent_cells, weights=l2_norm_correction_vec.array[:]
-    )
-    dg0_coarse_space = dfx.fem.functionspace(coarse_mesh, dg0_element)
-
-    dg0_coarse_space = dfx.fem.functionspace(coarse_mesh, dg0_element)
     l2_norm_dg0 = dfx.fem.Function(dg0_coarse_space)
-    l2_norm_dg0.x.array[:] = l2_norm_vec_coarse
+    l2_norm_dg0.x.array[cmap] = np.bincount(
+        cmap[parent_cells], weights=l2_norm_correction_vec.array[:]
+    )[cmap]
 
     fine_submesh, emap = dfx.mesh.create_submesh(
         fine_mesh, cdim, fine_cells_tags.find(2)
@@ -204,7 +202,10 @@ def compute_boundary_local_estimators(
         fine_submesh_indices[sorted_indices],
         fine_submesh_markers[sorted_indices],
     )
-    return h10_norm_dg0, l2_norm_dg0, fine_submesh_tags, fine_submesh
+
+    geo_dg0 = dfx.fem.Function(dg0_coarse_space)
+    geo_dg0.x.array[:] = h10_norm_dg0.x.array[:] + l2_norm_dg0.x.array[:]
+    return geo_dg0, fine_submesh_tags, fine_submesh
 
 
 def phifem_direct_solve(spaces, fh, phih, measures, coefs):
@@ -276,8 +277,6 @@ def phifem_direct_solve(spaces, fh, phih, measures, coefs):
     return solution_u, solution_w
 
 
-=======
->>>>>>> f923c5e (Remove phifem_direct_solve method.)
 def phifem_dual_solve(mixed_space, fh, gh, phih, measures, coefs):
     dx, dS, ds = (measures["dx"], measures["dS"], measures["ds"])
     pen_coef, stab_coef = (coefs["penalization"], coefs["stabilization"])
