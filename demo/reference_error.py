@@ -361,6 +361,8 @@ for i in range(iterations_num):
             coarse_levelset_2_ref,
             dg0_coarse_h_T_2_ref,
             dg0_cut_indicator_2_ref,
+            ref_dg0_space,
+            dg0_space,
         )
 
         with XDMFFile(
@@ -379,6 +381,10 @@ for i in range(iterations_num):
             ref_g,
             ref_dg0_space,
             dg0_space,
+            coarse_levelset_2_ref,
+            reference_levelset,
+            dg0_coarse_h_T_2_ref,
+            dg0_cut_indicator_2_ref,
         )
 
         with XDMFFile(

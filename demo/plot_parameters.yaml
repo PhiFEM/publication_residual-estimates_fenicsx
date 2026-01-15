@@ -19,6 +19,9 @@ phifem_3:
 fem:
   name: "FEM, $\\eta_1$"
   marker: "o"
+reference:
+  name: "Curved FEM, $\\eta_1$"
+  marker: "o"
 estimator:
   name: "$\\eta$"
   line: "--"
