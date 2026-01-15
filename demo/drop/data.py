@@ -4,6 +4,18 @@ import ufl
 from mpi4py import MPI
 from netgen.geom2d import SplineGeometry
 
+_angle = -np.pi / 16.0
+
+
+def _rotate(x, angle):
+    _sine_angle = np.sin(angle)
+    _cosine_angle = np.cos(angle)
+
+    rot_x = np.copy(x)
+    rot_x[0] = _cosine_angle * x[0] + _sine_angle * x[1]
+    rot_x[1] = -_sine_angle * x[0] + _cosine_angle * x[1]
+    return rot_x
+
 
 def generate_levelset(mode):
     def minimum(f1, f2):
@@ -33,6 +45,7 @@ def generate_levelset(mode):
         return val
 
     def levelset(x):
+        x = _rotate(x, _angle)
         val = maximum(phi_rectangle(x), -phi_ellipse(x))
         val = minimum(val, phi_circle(x))
         return val
@@ -57,16 +70,19 @@ def generate_dirichlet_data(mode):
 def gen_mesh(hmax, curved=False):
     geo = SplineGeometry()
     pnts = [
-        (-3, -1),
-        (0, -1),
-        (1, -1),
-        (1, 0),
-        (1, 1),
-        (0, 1),
-        (-1, 1),
-        (-1, 0),
-        (-1, -1),
+        (-3.0, -1.0),
+        (0.0, -1.0),
+        (1.0, -1.0),
+        (1.0, 0.0),
+        (1.0, 1.0),
+        (0.0, 1.0),
+        (-1.0, 1.0),
+        (-1.0, 0.0),
+        (-1.0, -1.0),
     ]
+    for i, pt in enumerate(pnts):
+        rot_pt = _rotate(pt, -_angle)
+        pnts[i] = (float(rot_pt[0]), float(rot_pt[1]))
 
     pts = [geo.AppendPoint(*pnt) for pnt in pnts]
     curves = [
@@ -83,5 +99,4 @@ def gen_mesh(hmax, curved=False):
     mesh = geoModel.model_to_mesh(gdim=2, hmax=hmax)[0]
     if curved:
         mesh = geoModel.curveField(3)
-
     return mesh, geoModel
