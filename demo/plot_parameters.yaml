@@ -47,30 +47,10 @@ eta_BC:
   name: "$\\eta_{\\mathrm{BC}}$"
   line: "-."
   color: "#b3de69"
-eta_geo_1:
-  name: "$\\eta_{1,\\mathrm{geo}}$"
-  line: "-."
-  color: "#bebada"
-eta_geo_0:
-  name: "$\\eta_{0,\\mathrm{geo}}$"
+eta_geo:
+  name: "$\\eta_{\\mathrm{geo}}$"
   line: "-."
   color: "#fccde5"
-source_term_osc:
-  name: "$\\mathrm{osc.}_f$"
-  line: ":"
-  color: "#fbb4ae"
-dirichlet_data_osc:
-  name: "$\\mathrm{osc.}_g$"
-  line: ":"
-  color: "#b3cde3"
-xi_h10:
-  name: "$|\\xi|_{1,\\Omega}$"
-  line: "-"
-  color: "#decbe4" 
-xi_l2:
-  name: "$\\sum_{T \\in T_h^{\\Gamma}} h_T^{-1}\\|\\xi\\|_{0,T}$"
-  line: "-"
-  color: "#fddaec"
 meshtags:
   cells: ["#2166ac", "#ef8a62", "#b2182b"]
   facets: ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#ffff33"]
