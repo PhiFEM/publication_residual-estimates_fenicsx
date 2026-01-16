@@ -122,24 +122,17 @@ cell_name = reference_mesh.topology.cell_name()
 # Define finite elements and reference FE spaces
 cg1_element = element("Lagrange", cell_name, fe_degree)
 ref_element = element("Lagrange", cell_name, ref_degree)
-ref_dg1_element = element("DG", cell_name, ref_degree)
 if phifem:
     levelset_element = element("Lagrange", cell_name, levelset_degree)
     reference_levelset_space = dfx.fem.functionspace(reference_mesh, levelset_element)
 dg0_element = element("DG", cell_name, 0)
-dg1_element = element("DG", cell_name, 0)
 
 reference_space = dfx.fem.functionspace(reference_mesh, ref_element)
 ref_dg0_space = dfx.fem.functionspace(reference_mesh, dg0_element)
-ref_dg1_space = dfx.fem.functionspace(reference_mesh, ref_dg1_element)
-
 
 # Load reference source terms
 if not exact_solution_available:
     write_log("Read reference solution.")
-    source_term = generate_source_term(np)
-    ref_f = dfx.fem.Function(reference_space)
-    ref_f.interpolate(source_term)
     dirichlet_data = generate_dirichlet_data(np)
 
     # Load reference solution
@@ -159,7 +152,6 @@ else:
     ref_solution = generate_exact_solution(ufl)
     ref_x = ufl.SpatialCoordinate(reference_mesh)
     reference_solution = ref_solution(ref_x)
-    ref_f = -ufl.div(ufl.grad(reference_solution))
     dirichlet_data = generate_exact_solution(np)
 
 ref_g = dfx.fem.Function(reference_space)
@@ -192,7 +184,6 @@ for i in range(iterations_num):
     if phifem:
         levelset_space = dfx.fem.functionspace(mesh, levelset_element)
         fe_levelset = dfx.fem.Function(levelset_space)
-    dg1_space = dfx.fem.functionspace(mesh, dg1_element)
     dg0_space = dfx.fem.functionspace(mesh, dg0_element)
     solution_u = dfx.fem.Function(fe_space)
     solution_p = dfx.fem.Function(aux_space)
@@ -245,18 +236,8 @@ for i in range(iterations_num):
             reference_levelset_space, levelset_space, reference_cells, padding=1.0e-14
         )
         # Compute NMM interpolation data between coarse spaces and ref spaces
-        nmm_dg12ref_dg1 = dfx.fem.create_interpolation_data(
-            ref_dg1_space, dg1_space, reference_cells, padding=1.0e-14
-        )
         nmm_dg02ref_dg0 = dfx.fem.create_interpolation_data(
             ref_dg0_space, dg0_space, reference_cells, padding=1.0e-14
-        )
-        nmm_dg02ref_dg1 = dfx.fem.create_interpolation_data(
-            ref_dg1_space, dg0_space, reference_cells, padding=1.0e-14
-        )
-        dg0_cut_indicator_2_ref = dfx.fem.Function(ref_dg0_space)
-        dg0_cut_indicator_2_ref.interpolate_nonmatching(
-            cut_indicator, reference_cells, nmm_dg02ref_dg0
         )
         dg0_cut_indicator_2_ref = dfx.fem.Function(ref_dg0_space)
         dg0_cut_indicator_2_ref.interpolate_nonmatching(
@@ -265,7 +246,7 @@ for i in range(iterations_num):
 
         solution_p_2_ref = dfx.fem.Function(reference_space)
         solution_p_2_ref.interpolate_nonmatching(
-            solution_p, reference_cells, nmm_dg12ref_dg1
+            solution_p, reference_cells, nmm_fe2ref
         )
 
         coarse_levelset_2_ref = dfx.fem.Function(reference_levelset_space)
@@ -373,27 +354,6 @@ for i in range(iterations_num):
 
         l2_err_sqd = ref_l2_norm.x.array.sum()
         triple_norm_err_sqd += l2_err_sqd
-
-        write_log(prefix + "Compute L2 phi p error.")
-        ref_phi_p_norm, coarse_phi_p_norm = compute_phi_p_error(
-            solution_p_2_ref,
-            reference_solution,
-            ref_g,
-            ref_dg0_space,
-            dg0_space,
-            coarse_levelset_2_ref,
-            reference_levelset,
-            dg0_coarse_h_T_2_ref,
-            dg0_cut_indicator_2_ref,
-        )
-
-        with XDMFFile(
-            reference_mesh.comm,
-            os.path.join(errors_dir, f"phi_error_{str(i).zfill(2)}.xdmf"),
-            "w",
-        ) as of:
-            of.write_mesh(mesh)
-            of.write_function(coarse_phi_norm)
 
         assert not np.any(np.isnan(ref_phi_norm.x.array)), (
             "ref_l2_p_err.x.array contains NaNs."
