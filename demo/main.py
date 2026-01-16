@@ -214,6 +214,14 @@ while num_dof < max_dof:
     dg0_element = element("DG", cell_name, 0)
     dg0_space = dfx.fem.functionspace(mesh, dg0_element)
 
+    cells_tags_dg0 = dfx.fem.Function(dg0_space)
+    cells_tags_dg0.x.array[:] = cells_tags.values
+
+    save_function(
+        cells_tags_dg0,
+        os.path.join(output_dir, tags_dir, f"cells_tags_{str(i).zfill(2)}"),
+    )
+
     levelset_space = dfx.fem.functionspace(mesh, levelset_element)
 
     omega_h_cells = np.union1d(cells_tags.find(1), cells_tags.find(2))
