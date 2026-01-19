@@ -152,13 +152,12 @@ def compute_boundary_local_estimators(
     l2_norm_correction_vec = assemble_vector(l2_norm_correction_form)
 
     l2_norm_dg0_fine = dfx.fem.Function(dg0_fine_space)
-    l2_norm_dg0_fine.x.array[:] = l2_norm_correction_vec.array[:] * h_T_coarse.x.array[
-        :
-    ] ** (-2)
+    l2_norm_dg0_fine.x.array[:] = l2_norm_correction_vec.array[:]
     l2_norm_dg0 = dfx.fem.Function(dg0_coarse_space)
     l2_norm_dg0.x.array[cmap] = np.bincount(
         cmap[parent_cells], weights=l2_norm_correction_vec.array[:]
     )[cmap]
+    l2_norm_dg0.x.array[:] = l2_norm_dg0.x.array[:] * h_T_coarse.x.array[:] ** (-2)
 
     fine_submesh, emap = dfx.mesh.create_submesh(
         fine_mesh, cdim, fine_cells_tags.find(2)
