@@ -119,6 +119,7 @@ boundary_correction = parameters["boundary_correction"]
 auxiliary_degree = parameters["auxiliary_degree"]
 discretize_levelset = parameters["discretize_levelset"]
 dirichlet_estimator = parameters["dirichlet_estimator"]
+single_layer = parameters["single_layer"]
 
 # Create background mesh
 nx = int(np.abs(bbox[0][1] - bbox[0][0]) / initial_mesh_size / np.sqrt(2.0))
@@ -150,50 +151,16 @@ while num_dof < max_dof:
         detection_levelset = dfx.fem.Function(levelset_bg_space)
         detection_levelset.interpolate(generate_detection_levelset(np))
     else:
-        x_ufl = ufl.SpatialCoordinate(mesh)
-        detection_levelset = generate_detection_levelset(ufl)(x_ufl)
+        detection_levelset = generate_detection_levelset(ufl)
     write_log(prefix + "Computation of mesh tags")
     cells_tags, facets_tags, _, ds, _, _ = compute_tags_measures(
-        mesh, detection_levelset, detection_degree, box_mode=True
+        mesh,
+        detection_levelset,
+        detection_degree,
+        box_mode=True,
+        single_layer_cut=single_layer,
     )
 
-    if plot:
-        write_log(prefix + "Plot mesh tags")
-        leg_dict = {1: "inside", 2: "cut", 3: "outside"}
-        plot_levelset = generate_detection_levelset(np)
-        fig = plt.figure()
-        ax = fig.subplots()
-        levelset_kwargs = {"colors": "k", "linewidths": 2.0, "linestyles": "--"}
-        plot_mesh_tags(
-            mesh,
-            cells_tags,
-            ax,
-            expression_levelset=plot_levelset,
-            leg_dict=leg_dict,
-            levelset_kwargs=levelset_kwargs,
-            display_scalarbar=False,
-        )
-        plt.savefig(
-            os.path.join(tags_dir, f"cells_tags_{str(i).zfill(2)}.png"),
-            bbox_inches="tight",
-            dpi=500,
-        )
-        leg_dict = {1: "inside", 2: "cut", 3: "inside boundary", 4: "outside boundary"}
-        fig = plt.figure()
-        ax = fig.subplots()
-        plot_mesh_tags(
-            mesh,
-            facets_tags,
-            ax,
-            expression_levelset=plot_levelset,
-            leg_dict=leg_dict,
-            levelset_kwargs=levelset_kwargs,
-        )
-        plt.savefig(
-            os.path.join(tags_dir, f"facets_tags_{str(i).zfill(2)}.png"),
-            bbox_inches="tight",
-            dpi=500,
-        )
     results["iteration"].append(i)
 
     dx = ufl.Measure("dx", domain=mesh, subdomain_data=cells_tags)
@@ -220,6 +187,21 @@ while num_dof < max_dof:
     save_function(
         cells_tags_dg0,
         os.path.join(output_dir, tags_dir, f"cells_tags_{str(i).zfill(2)}"),
+    )
+
+    mesh_edges = dfx.mesh.locate_entities(
+        mesh, 1, lambda x: np.ones_like(x[0]).astype(bool)
+    )
+    wireframe = dfx.mesh.create_submesh(mesh, 1, mesh_edges)[0]
+    wf_cell_name = wireframe.topology.cell_name()
+    wf_dg0_element = element("DG", wf_cell_name, 0)
+    wf_dg0_space = dfx.fem.functionspace(wireframe, wf_dg0_element)
+    facets_tags_dg0 = dfx.fem.Function(wf_dg0_space)
+    facets_tags_dg0.x.array[:] = facets_tags.values
+
+    save_function(
+        facets_tags_dg0,
+        os.path.join(output_dir, tags_dir, f"facets_tags_{str(i).zfill(2)}"),
     )
 
     levelset_space = dfx.fem.functionspace(mesh, levelset_element)
@@ -321,7 +303,7 @@ while num_dof < max_dof:
         write_log(prefix + "Computation boundary estimator.")
         eta_dict["eta_geo"], parent_cells_tags, fine_mesh = (
             compute_boundary_local_estimators(
-                mesh, solution, levelset, phih, cells_tags, facets_tags, dual=True
+                mesh, solution, levelset, phih, cells_tags, dual=True
             )
         )
         if plot:
