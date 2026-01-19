@@ -75,7 +75,6 @@ def compute_boundary_local_estimators(
     levelset,
     phih,
     cells_tags,
-    facets_tags,
     dual=False,
     padding=1.0e-14,
 ):
@@ -86,29 +85,6 @@ def compute_boundary_local_estimators(
         submesh, option=RefinementOption.parent_cell
     )[:2]
 
-    # facets_to_refine = np.union1d(facets_tags.find(2), facets_tags.find(3))
-    # facets_to_refine = np.union1d(facets_to_refine, facets_tags.find(4))
-    #
-    # num_cells = coarse_mesh.topology.index_map(cdim).size_global
-    # dummy_mesh, cmap = dfx.mesh.create_submesh(coarse_mesh, cdim, np.arange(num_cells))[
-    # :2
-    # ]
-    #
-    # Mark the cells to refine in the coarse mesh
-    # dummy_mesh.topology.create_entities(dummy_mesh.topology.dim - 1)
-    # fdim = cdim - 1
-    # coarse_mesh.topology.create_connectivity(fdim, cdim)
-    # f2c_connect_dummy = coarse_mesh.topology.connectivity(fdim, cdim)
-    # f2c_map_dummy = _reshape_facets_map(f2c_connect_dummy)
-    # cells_to_refine = f2c_map_dummy[facets_to_refine]
-    # cells_to_refine = np.unique(cells_to_refine.reshape(-1))
-
-    # Mark the corresponding child cells of the refined cells in the fine mesh
-    # fine_mesh, parent_cells, _ = dfx.mesh.refine(
-    # dummy_mesh,
-    # facets_to_refine,
-    # option=RefinementOption.parent_cell,
-    # )
     parent_cells = compute_parent_cells(submesh, fine_mesh, parent_cells)
 
     fine_cells_tags = dfx.mesh.transfer_meshtag(cells_tags, fine_mesh, parent_cells)
@@ -145,13 +121,6 @@ def compute_boundary_local_estimators(
     v0 = ufl.TestFunction(dg0_fine_space)
 
     h_T_coarse = cell_diameter(dg0_coarse_space)
-    h_T_fine = dfx.fem.Function(dg0_fine_space)
-    nmm_dg0_coarse_space2dg0_fine_space = dfx.fem.create_interpolation_data(
-        dg0_fine_space, dg0_coarse_space, fine_cells, padding=padding
-    )
-    h_T_fine.interpolate_nonmatching(
-        h_T_coarse, fine_cells, nmm_dg0_coarse_space2dg0_fine_space
-    )
     correction_function_fine = dfx.fem.Function(fine_space)
     correction_function_fine.x.array[:] = (
         phih_fine.x.array[:] - phi_fine.x.array[:]
@@ -175,8 +144,7 @@ def compute_boundary_local_estimators(
 
     # eta_{0,z}
     l2_norm_correction = (
-        h_T_fine ** (-2)
-        * ufl.inner(correction_function_fine, correction_function_fine)
+        ufl.inner(correction_function_fine, correction_function_fine)
         * v0
         * dx(measure_ind)
     )
@@ -184,7 +152,9 @@ def compute_boundary_local_estimators(
     l2_norm_correction_vec = assemble_vector(l2_norm_correction_form)
 
     l2_norm_dg0_fine = dfx.fem.Function(dg0_fine_space)
-    l2_norm_dg0_fine.x.array[:] = l2_norm_correction_vec.array[:]
+    l2_norm_dg0_fine.x.array[:] = l2_norm_correction_vec.array[:] * h_T_coarse.x.array[
+        :
+    ] ** (-2)
     l2_norm_dg0 = dfx.fem.Function(dg0_coarse_space)
     l2_norm_dg0.x.array[cmap] = np.bincount(
         cmap[parent_cells], weights=l2_norm_correction_vec.array[:]
