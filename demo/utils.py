@@ -411,8 +411,8 @@ def residual_estimation(
 
     w0 = ufl.TestFunction(dg0_space)
 
-    eta_r = h_T**2 * ufl.inner(ufl.inner(rh, rh), w0) * dx_est
-    eta_J = ufl.avg(h_T) * ufl.inner(ufl.inner(Jh, Jh), ufl.avg(w0)) * dS_est
+    eta_r = h_T**2 * ufl.inner(ufl.inner(rh, rh), w0) * dx_est(1, 2)
+    eta_J = ufl.avg(h_T) * ufl.inner(ufl.inner(Jh, Jh), ufl.avg(w0)) * dS_est(1, 2)
 
     eta_dict = {"eta_r": eta_r, "eta_J": eta_J}
 
