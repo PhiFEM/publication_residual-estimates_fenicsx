@@ -10,9 +10,9 @@ phifem-geo:
 phifem-bc-geo:
   name: "$\\varphi$-FEM, $\\eta$"
   marker: "^"
-phifem-bc-geo-2:
-  name: "$\\varphi$-FEM, $\\eta$ 2"
-  marker: "v"
+phifem-bc-geo-no-sl:
+  name: "$\\varphi$-FEM (no sl), $\\eta$"
+  marker: "."
 phifem_3:
   name: "$\\varphi$-FEM, $\\eta$ (DG0 $p$)"
   marker: "v"
@@ -31,13 +31,21 @@ h10_error:
   line: "-"
   color: "#377eb8"
 triple_norm_error:
-  name: "$|||E|||_{\\Omega}$"
+  name: "$E$"
   line: "-."
   color: "#4daf4a"
-l2_p_error:
-  name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|h_T^{-1}(p - p_h)\\|_{T \\cap \\Omega}^2\\right)^{1/2}$"
+l2_error:
+  name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|u - u_h\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
   line: "-"
   color: "#984ea3"
+phi_p_error:
+  name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|p\\varphi - p_h\\varphi_h\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
+  line: "-"
+  color: "#762a83"
+phi_error:
+  name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|p_h(\\varphi - \\varphi_h)\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
+  line: "-"
+  color: "#af8dc3"
 eta_r:
   name: "$\\eta_r$"
   line: "-."

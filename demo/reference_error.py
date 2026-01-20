@@ -165,6 +165,9 @@ if phifem:
 # Allocate memory for results
 results = pl.read_csv(os.path.join(output_dir, "results.csv")).to_dict()
 results["h10_error"] = [np.nan] * iterations_num
+results["l2_error"] = [np.nan] * iterations_num
+results["phi_p_error"] = [np.nan] * iterations_num
+results["phi_error"] = [np.nan] * iterations_num
 results["triple_norm_error"] = [np.nan] * iterations_num
 
 for i in range(iterations_num):
@@ -264,8 +267,6 @@ for i in range(iterations_num):
     solution_u_2_ref = dfx.fem.Function(reference_space)
     solution_u_2_ref.interpolate_nonmatching(solution_u, reference_cells, nmm_fe2ref)
 
-    triple_norm_err_sqd = 0.0
-
     # Compute reference H10 error
     write_log(prefix + "Compute H10 error.")
     ref_h10_norm, coarse_h10_norm = compute_h10_error(
@@ -273,7 +274,7 @@ for i in range(iterations_num):
     )
 
     with XDMFFile(
-        reference_mesh.comm,
+        mesh.comm,
         os.path.join(errors_dir, f"h10_error_{str(i).zfill(2)}.xdmf"),
         "w",
     ) as of:
@@ -282,8 +283,6 @@ for i in range(iterations_num):
 
     h10_err_sqd = ref_h10_norm.x.array.sum()
     results["h10_error"][i] = np.sqrt(h10_err_sqd)
-
-    triple_norm_err_sqd += h10_err_sqd
 
     if phifem:
         write_log(prefix + "Compute L2 error.")
@@ -297,7 +296,7 @@ for i in range(iterations_num):
         )
 
         with XDMFFile(
-            reference_mesh.comm,
+            mesh.comm,
             os.path.join(errors_dir, f"l2_error_{str(i).zfill(2)}.xdmf"),
             "w",
         ) as of:
@@ -305,7 +304,7 @@ for i in range(iterations_num):
             of.write_function(coarse_l2_norm)
 
         l2_err_sqd = ref_l2_norm.x.array.sum()
-        triple_norm_err_sqd += l2_err_sqd
+        results["l2_error"][i] = np.sqrt(l2_err_sqd)
 
         write_log(prefix + "Compute L2 phi p error.")
         ref_phi_p_norm, coarse_phi_p_norm = compute_phi_p_error(
@@ -329,11 +328,11 @@ for i in range(iterations_num):
             of.write_function(coarse_phi_p_norm)
 
         assert not np.any(np.isnan(ref_phi_p_norm.x.array)), (
-            "ref_l2_p_err.x.array contains NaNs."
+            "ref_phi_p_norm.x.array contains NaNs."
         )
         phi_p_err_sqd = ref_phi_p_norm.x.array.sum()
 
-        triple_norm_err_sqd += phi_p_err_sqd
+        results["phi_p_error"][i] = np.sqrt(phi_p_err_sqd)
 
         write_log(prefix + "Compute phi error.")
         ref_phi_norm, coarse_phi_norm = compute_phi_error(
@@ -347,22 +346,28 @@ for i in range(iterations_num):
         )
 
         with XDMFFile(
-            reference_mesh.comm, os.path.join(errors_dir, "ref_l2_error.xdmf"), "w"
+            reference_mesh.comm,
+            os.path.join(errors_dir, f"ref_phi_error_{str(i).zfill(2)}.xdmf"),
+            "w",
         ) as of:
             of.write_mesh(reference_mesh)
-            of.write_function(ref_l2_norm)
+            of.write_function(coarse_phi_norm)
 
-        l2_err_sqd = ref_l2_norm.x.array.sum()
-        triple_norm_err_sqd += l2_err_sqd
+        phi_err_sqd = ref_phi_norm.x.array.sum()
+        results["phi_error"][i] = np.sqrt(phi_err_sqd)
 
         assert not np.any(np.isnan(ref_phi_norm.x.array)), (
-            "ref_l2_p_err.x.array contains NaNs."
+            "ref_phi_norm.x.array contains NaNs."
         )
-        phi_err_sqd = ref_phi_norm.x.array.sum()
 
+        triple_norm_err_sqd = h10_err_sqd
+        triple_norm_err_sqd += l2_err_sqd
+        triple_norm_err_sqd += phi_p_err_sqd
         triple_norm_err_sqd += phi_err_sqd
 
         results["triple_norm_error"][i] = np.sqrt(triple_norm_err_sqd)
+    else:
+        results["triple_norm_error"][i] = np.nan
 
     df = pl.DataFrame(results)
     header = f"======================================================================================================\n{prefix}\n======================================================================================================"

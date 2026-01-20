@@ -1,5 +1,5 @@
 # Drop test case
-initial_mesh_size: 0.1
+initial_mesh_size: 0.5
 maximum_dof: 5e4
 refinement: "adap"
 mesh_type: "bg"
@@ -12,8 +12,9 @@ boundary_correction: true
 dirichlet_estimator: true
 penalization_coefficient: 1.0
 stabilization_coefficient: 1.0
+single_layer: true
 marking_parameter: 0.3
-discretize_levelset: false
+discretize_levelset: true
 bbox:
 - [-3.25, 1.25]
 - [-1.25, 1.75]

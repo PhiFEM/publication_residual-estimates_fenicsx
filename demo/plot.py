@@ -26,10 +26,13 @@ parser.add_argument(
     help="Truncation of the top of the data to be plotted.",
 )
 
+parser.add_argument("-r", "--rate", action="store_true")
+
 args = parser.parse_args()
 parameters_list = args.parameters.split(sep=",")
 data_list = args.data.split(sep=",")
 trunc_top = -args.trunc
+rate = args.rate
 
 fig = plt.figure()
 ax = fig.subplots()
@@ -83,12 +86,22 @@ for parameter in parameters_list:
         except ValueError:
             ys_not_zero = False
         if ys_not_zero:
+            if rate:
+                trunc_btm = -np.maximum(-(trunc_top - 5), 0)
+                a, b = np.polyfit(
+                    np.log(xs[trunc_btm:trunc_top]),
+                    np.log(ys[trunc_btm:trunc_top]),
+                    deg=1,
+                )
+                rate = " (s=" + str(np.round(a, 1)) + ")"
+            else:
+                rate = ""
             plt.loglog(
                 xs[:trunc_top],
                 ys[:trunc_top],
                 lstyle + mstyle,
                 c=color,
-                label=label,
+                label=label + rate,
                 path_effects=[
                     pe.Stroke(linewidth=2.5, foreground="#252525"),
                     pe.Normal(),
