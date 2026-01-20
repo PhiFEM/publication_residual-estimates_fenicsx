@@ -288,7 +288,7 @@ while num_dof < max_dof:
         solution_u,
         fh,
         gh,
-        {"dx": dx, "dS": dS},
+        {"dx": dx((1, 2)), "dS": dS((1, 2))},
         coefs=coefs,
         phih=phih,
         solution_p=solution_p,
