@@ -2,6 +2,9 @@ import ngsPETSc.utils.fenicsx as ngfx
 from mpi4py import MPI
 from netgen.geom2d import SplineGeometry
 
+INITIAL_MESH_SIZE = 0.1
+MAXIMUM_DOF = 5.0e4
+
 
 def generate_levelset(mode):
     def levelset(x):

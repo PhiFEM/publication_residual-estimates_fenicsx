@@ -26,10 +26,13 @@ parser.add_argument(
     help="Truncation of the top of the data to be plotted.",
 )
 
+parser.add_argument("-r", "--rate", action="store_true")
+
 args = parser.parse_args()
 parameters_list = args.parameters.split(sep=",")
 data_list = args.data.split(sep=",")
 trunc_top = -args.trunc
+rate = args.rate
 
 fig = plt.figure()
 ax = fig.subplots()
@@ -42,7 +45,6 @@ eta_comp = np.all(["eta" in data for data in data_list])
 for parameter in parameters_list:
     demo, param_name = parameter.split(sep="/")
 
-    mstyle = plot_param[param_name]["marker"]
     parameter_names.append(param_name)
     with open(os.path.join(parameter + ".yaml"), "rb") as f:
         parameters = yaml.safe_load(f)
@@ -63,12 +65,16 @@ for parameter in parameters_list:
     df = pl.read_csv(data_path)
     for d in data_list:
         d_name = plot_param[d]["name"]
+        mstyle = plot_param[d]["marker"]
         if eta_comp:
             label = rf"{d_name}"
         else:
             label = rf"{d_name} ({scheme_name})"
         lstyle = plot_param[d]["line"]
-        color = plot_param[d]["color"]
+        if eta_comp:
+            color = plot_param[d]["color"]
+        else:
+            color = plot_param[param_name]["color"]
         xs = df["dof"].to_numpy()
         try:
             ys = df[d].to_numpy()
@@ -83,12 +89,22 @@ for parameter in parameters_list:
         except ValueError:
             ys_not_zero = False
         if ys_not_zero:
+            if rate:
+                trunc_btm = -np.maximum(-(trunc_top - 5), 0)
+                a, b = np.polyfit(
+                    np.log(xs[trunc_btm:trunc_top]),
+                    np.log(ys[trunc_btm:trunc_top]),
+                    deg=1,
+                )
+                rate = " (s=" + str(np.round(a, 1)) + ")"
+            else:
+                rate = ""
             plt.loglog(
                 xs[:trunc_top],
                 ys[:trunc_top],
                 lstyle + mstyle,
                 c=color,
-                label=label,
+                label=label + rate,
                 path_effects=[
                     pe.Stroke(linewidth=2.5, foreground="#252525"),
                     pe.Normal(),

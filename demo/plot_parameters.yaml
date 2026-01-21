@@ -1,77 +1,67 @@
 phifem: 
   name: "$\\varphi$-FEM, $\\eta_1$"
-  marker: "p"
-phifem-dir:
+  color: "#abd9e9"
+phifem-bc:
   name: "$\\varphi$-FEM, $\\eta_3$"
-  marker: "s"
-phifem-bdy:
+  color: "#fdae61"
+phifem-geo:
   name: "$\\varphi$-FEM, $\\eta_2$"
-  marker: "*"
-phifem-dir-bdy:
+  color: "#ffffbf"
+phifem-bc-geo:
   name: "$\\varphi$-FEM, $\\eta$"
-  marker: "^"
-phifem-dir-bdy-2:
-  name: "$\\varphi$-FEM, $\\eta$ 2"
-  marker: "v"
-phifem_3:
-  name: "$\\varphi$-FEM, $\\eta$ (DG0 $p$)"
-  marker: "v"
+  color: "#d7191c"
 fem:
   name: "FEM, $\\eta_1$"
+  color: "#2c7bb6"
+reference:
+  name: "Curved FEM, $\\eta_1$"
   marker: "o"
 estimator:
   name: "$\\eta$"
+  marker: "p"
   line: "--"
-  color: "#e41a1c"
-error:
+h10_error:
   name: "$|e|_{1,\\Omega}$"
+  marker: "d"
   line: "-"
-  color: "#377eb8"
-total_error:
-  name: "$|||E|||_{\\Omega}$"
+triple_norm_error:
+  name: "$E$"
+  marker: "x"
   line: "-."
-  color: "#4daf4a"
-l2_p_error:
-  name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|h_T^{-1}(p - p_h)\\|_{T \\cap \\Omega}^2\\right)^{1/2}$"
+l2_error:
+  name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|u - u_h\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
+  marker: "^"
   line: "-"
-  color: "#984ea3"
-eta_T:
+phi_p_error:
+  name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|p\\varphi - p_h\\varphi_h\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
+  marker: "*"
+  line: "-"
+phi_error:
+  name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|p_h(\\varphi - \\varphi_h)\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
+  marker: "o"
+  line: "-"
+  color: "#af8dc3"
+eta_r:
   name: "$\\eta_r$"
+  marker: "^"
   line: "-."
   color: "#8dd3c7"
-eta_E:
+eta_J:
   name: "$\\eta_J$"
+  marker: "^"
   line: "-."
   color: "#fb8072"
-eta_p:
+eta_BC:
   name: "$\\eta_{\\mathrm{BC}}$"
+  marker: "^"
   line: "-."
   color: "#b3de69"
-eta_1_z:
-  name: "$\\eta_{1,\\mathrm{geo}}$"
-  line: "-."
-  color: "#bebada"
-eta_0_z:
-  name: "$\\eta_{0,\\mathrm{geo}}$"
+eta_geo:
+  name: "$\\eta_{\\mathrm{geo}}$"
+  marker: "^"
   line: "-."
   color: "#fccde5"
-source_term_osc:
-  name: "$\\mathrm{osc.}_f$"
-  line: ":"
-  color: "#fbb4ae"
-dirichlet_data_osc:
-  name: "$\\mathrm{osc.}_g$"
-  line: ":"
-  color: "#b3cde3"
-xi_h10:
-  name: "$|\\xi|_{1,\\Omega}$"
-  line: "-"
-  color: "#decbe4" 
-xi_l2:
-  name: "$\\sum_{T \\in T_h^{\\Gamma}} h_T^{-1}\\|\\xi\\|_{0,T}$"
-  line: "-"
-  color: "#fddaec"
 meshtags:
   cells: ["#2166ac", "#ef8a62", "#b2182b"]
   facets: ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#ffff33"]
-legend_text_size: 12
+legend_text_size: 10

@@ -2,15 +2,10 @@ import argparse
 import os
 import sys
 
-import dolfinx as dfx
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
 import yaml
-from basix.ufl import element
-from dolfinx.io import XDMFFile
-from mpi4py import MPI
-from plots import plot_mesh
 
 parent_dir = os.path.dirname(__file__)
 
@@ -85,24 +80,3 @@ fig.update_layout(
 )
 
 fig.write_html(os.path.join(demo, "levelset.html"))
-
-mesh, geoModel = gen_mesh(0.05, curved=True)
-plot_mesh(mesh, "mesh", wireframe=True, linewidth=1.5)
-
-
-nx = 500
-ny = 500
-cell_type = dfx.cpp.mesh.CellType.triangle
-mesh = dfx.mesh.create_rectangle(
-    MPI.COMM_WORLD, np.asarray(bbox).T, [nx, ny], cell_type
-)
-cell_name = mesh.topology.cell_name()
-levelset_element = element("CG", cell_name, 1)
-levelset_space = dfx.fem.functionspace(mesh, levelset_element)
-
-levelset_h = dfx.fem.Function(levelset_space)
-levelset_h.interpolate(levelset)
-
-with XDMFFile(mesh.comm, os.path.join(demo, "levelset_fine.xdmf"), "w") as of:
-    of.write_mesh(mesh)
-    of.write_function(levelset_h)

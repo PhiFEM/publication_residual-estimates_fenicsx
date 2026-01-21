@@ -5,7 +5,7 @@ from mpi4py import MPI
 from netgen.geom2d import SplineGeometry
 
 _angle = -np.pi / 16.0
-INITIAL_MESH_SIZE = 0.1
+INITIAL_MESH_SIZE = 0.05
 MAXIMUM_DOF = 5.0e4
 
 
@@ -55,18 +55,18 @@ def generate_levelset(mode):
     return levelset
 
 
-def generate_source_term(mode):
-    def source_term(x):
-        return np.ones_like(x[0])
+def generate_exact_solution(mode):
+    c = _rotate(np.asarray([-3.0, -1.0]), -_angle)
+    sigma = 5.0
+    # def exact_solution(x):
+    #     x = _rotate(x, _angle)
+    #     return ((x[0] - c[0]) ** 2 + (x[1] - c[1]) ** 2) ** (1.0 / 3.0)
 
-    return source_term
+    def exact_solution(x):
+        x = _rotate(x, _angle)
+        return mode.exp(-sigma * ((x[0] - c[0]) ** 2 + (x[1] - c[1]) ** 2))
 
-
-def generate_dirichlet_data(mode):
-    def dirichlet_data(x):
-        return np.zeros_like(x[0])
-
-    return dirichlet_data
+    return exact_solution
 
 
 def gen_mesh(hmax, curved=False):
@@ -83,7 +83,7 @@ def gen_mesh(hmax, curved=False):
         (-1.0, -1.0),
     ]
     for i, pt in enumerate(pnts):
-        rot_pt = _rotate(np.asarray([pt[0], pt[1]]), -_angle)
+        rot_pt = _rotate([pt[0], pt[1]], -_angle)
         pnts[i] = (float(rot_pt[0]), float(rot_pt[1]))
 
     pts = [geo.AppendPoint(*pnt) for pnt in pnts]

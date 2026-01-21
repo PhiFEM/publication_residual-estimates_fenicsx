@@ -15,14 +15,12 @@ from mpi4py import MPI
 
 sys.path.append("../")
 
-from plots import plot_scalar
 from utils import (
     cell_diameter,
-    compute_dirichlet_oscillations,
     compute_h10_error,
-    compute_l2_error_p,
-    compute_source_term_oscillations,
-    compute_xi_h10_l2,
+    compute_l2_error,
+    compute_phi_error,
+    compute_phi_p_error,
     write_log,
 )
 
@@ -55,6 +53,7 @@ dirs = [
     checkpoint_dir,
     errors_dir,
 ]
+
 if os.path.isdir(errors_dir):
     shutil.rmtree(errors_dir)
     os.mkdir(errors_dir)
@@ -123,24 +122,17 @@ cell_name = reference_mesh.topology.cell_name()
 # Define finite elements and reference FE spaces
 cg1_element = element("Lagrange", cell_name, fe_degree)
 ref_element = element("Lagrange", cell_name, ref_degree)
-ref_dg1_element = element("DG", cell_name, ref_degree)
 if phifem:
     levelset_element = element("Lagrange", cell_name, levelset_degree)
     reference_levelset_space = dfx.fem.functionspace(reference_mesh, levelset_element)
 dg0_element = element("DG", cell_name, 0)
-dg1_element = element("DG", cell_name, 0)
 
 reference_space = dfx.fem.functionspace(reference_mesh, ref_element)
 ref_dg0_space = dfx.fem.functionspace(reference_mesh, dg0_element)
-ref_dg1_space = dfx.fem.functionspace(reference_mesh, ref_dg1_element)
-
 
 # Load reference source terms
 if not exact_solution_available:
     write_log("Read reference solution.")
-    source_term = generate_source_term(np)
-    ref_f = dfx.fem.Function(reference_space)
-    ref_f.interpolate(source_term)
     dirichlet_data = generate_dirichlet_data(np)
 
     # Load reference solution
@@ -160,25 +152,23 @@ else:
     ref_solution = generate_exact_solution(ufl)
     ref_x = ufl.SpatialCoordinate(reference_mesh)
     reference_solution = ref_solution(ref_x)
-    ref_f = -ufl.div(ufl.grad(reference_solution))
     dirichlet_data = generate_exact_solution(np)
 
 ref_g = dfx.fem.Function(reference_space)
 ref_g.interpolate(dirichlet_data)
 
-levelset = generate_levelset(np)
-
+if phifem:
+    levelset = generate_levelset(np)
+    reference_levelset = dfx.fem.Function(reference_levelset_space)
+    reference_levelset.interpolate(levelset)
 
 # Allocate memory for results
 results = pl.read_csv(os.path.join(output_dir, "results.csv")).to_dict()
-results["error"] = [np.nan] * iterations_num
-results["l2_p_error"] = [np.nan] * iterations_num
+results["h10_error"] = [np.nan] * iterations_num
+results["l2_error"] = [np.nan] * iterations_num
+results["phi_p_error"] = [np.nan] * iterations_num
+results["phi_error"] = [np.nan] * iterations_num
 results["triple_norm_error"] = [np.nan] * iterations_num
-results["source_term_osc"] = [np.nan] * iterations_num
-results["dirichlet_data_osc"] = [np.nan] * iterations_num
-results["total_error"] = [np.nan] * iterations_num
-results["xi_h10"] = [np.nan] * iterations_num
-results["xi_l2"] = [np.nan] * iterations_num
 
 for i in range(iterations_num):
     prefix = f"REFERENCE ERROR | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
@@ -192,14 +182,14 @@ for i in range(iterations_num):
         comm=MPI.COMM_WORLD,
     )
     fe_space = dfx.fem.functionspace(mesh, cg1_element)
+    aux_space = dfx.fem.functionspace(mesh, cg1_element)
 
     if phifem:
         levelset_space = dfx.fem.functionspace(mesh, levelset_element)
         fe_levelset = dfx.fem.Function(levelset_space)
-    dg1_space = dfx.fem.functionspace(mesh, dg1_element)
     dg0_space = dfx.fem.functionspace(mesh, dg0_element)
     solution_u = dfx.fem.Function(fe_space)
-    solution_p = dfx.fem.Function(dg1_space)
+    solution_p = dfx.fem.Function(aux_space)
 
     write_log(prefix + "Load solution_u.")
     adios4dolfinx.read_function(
@@ -249,27 +239,17 @@ for i in range(iterations_num):
             reference_levelset_space, levelset_space, reference_cells, padding=1.0e-14
         )
         # Compute NMM interpolation data between coarse spaces and ref spaces
-        nmm_dg12ref_dg1 = dfx.fem.create_interpolation_data(
-            ref_dg1_space, dg1_space, reference_cells, padding=1.0e-14
-        )
         nmm_dg02ref_dg0 = dfx.fem.create_interpolation_data(
             ref_dg0_space, dg0_space, reference_cells, padding=1.0e-14
-        )
-        nmm_dg02ref_dg1 = dfx.fem.create_interpolation_data(
-            ref_dg1_space, dg0_space, reference_cells, padding=1.0e-14
-        )
-        dg0_cut_indicator_2_ref = dfx.fem.Function(ref_dg0_space)
-        dg0_cut_indicator_2_ref.interpolate_nonmatching(
-            cut_indicator, reference_cells, nmm_dg02ref_dg0
         )
         dg0_cut_indicator_2_ref = dfx.fem.Function(ref_dg0_space)
         dg0_cut_indicator_2_ref.interpolate_nonmatching(
             cut_indicator, reference_cells, nmm_dg02ref_dg0
         )
 
-        dg1_solution_p_2_ref_dg1 = dfx.fem.Function(ref_dg1_space)
-        dg1_solution_p_2_ref_dg1.interpolate_nonmatching(
-            solution_p, reference_cells, nmm_dg12ref_dg1
+        solution_p_2_ref = dfx.fem.Function(reference_space)
+        solution_p_2_ref.interpolate_nonmatching(
+            solution_p, reference_cells, nmm_fe2ref
         )
 
         coarse_levelset_2_ref = dfx.fem.Function(reference_levelset_space)
@@ -293,135 +273,101 @@ for i in range(iterations_num):
         solution_u_2_ref, reference_solution, ref_dg0_space, dg0_space
     )
 
-    if coarse_h10_norm is not None:
-        plot_scalar(
-            coarse_h10_norm, os.path.join(errors_dir, f"h10_error_{str(i).zfill(2)}")
-        )
-
     with XDMFFile(
-        reference_mesh.comm, os.path.join(errors_dir, "ref_h10_error.xdmf"), "w"
+        mesh.comm,
+        os.path.join(errors_dir, f"h10_error_{str(i).zfill(2)}.xdmf"),
+        "w",
     ) as of:
-        of.write_mesh(reference_mesh)
-        of.write_function(ref_h10_norm)
+        of.write_mesh(mesh)
+        of.write_function(coarse_h10_norm)
 
     h10_err_sqd = ref_h10_norm.x.array.sum()
-    results["error"][i] = np.sqrt(h10_err_sqd)
+    results["h10_error"][i] = np.sqrt(h10_err_sqd)
 
     if phifem:
-        plot_scalar(
-            dg1_solution_p_2_ref_dg1,
-            os.path.join(errors_dir, f"ref_solution_p_{str(i).zfill(2)}"),
-        )
-        plot_scalar(
-            coarse_levelset_2_ref,
-            os.path.join(errors_dir, f"ref_levelset_{str(i).zfill(2)}"),
-        )
-        plot_scalar(
+        write_log(prefix + "Compute L2 error.")
+        ref_l2_norm, coarse_l2_norm = compute_l2_error(
+            solution_u_2_ref,
+            reference_solution,
+            ref_dg0_space,
+            dg0_space,
             dg0_coarse_h_T_2_ref,
-            os.path.join(errors_dir, f"ref_coarse_mesh_h_T_{str(i).zfill(2)}"),
-            xdmf=True,
+            dg0_cut_indicator_2_ref,
         )
 
-        write_log(prefix + "Compute L2 error p.")
-        ref_l2_p_err = compute_l2_error_p(
-            dg1_solution_p_2_ref_dg1,
+        with XDMFFile(
+            mesh.comm,
+            os.path.join(errors_dir, f"l2_error_{str(i).zfill(2)}.xdmf"),
+            "w",
+        ) as of:
+            of.write_mesh(mesh)
+            of.write_function(coarse_l2_norm)
+
+        l2_err_sqd = ref_l2_norm.x.array.sum()
+        results["l2_error"][i] = np.sqrt(l2_err_sqd)
+
+        write_log(prefix + "Compute L2 phi p error.")
+        ref_phi_p_norm, coarse_phi_p_norm = compute_phi_p_error(
+            solution_p_2_ref,
             reference_solution,
             ref_g,
+            ref_dg0_space,
+            dg0_space,
+            coarse_levelset_2_ref,
+            reference_levelset,
+            dg0_coarse_h_T_2_ref,
+            dg0_cut_indicator_2_ref,
+        )
+
+        with XDMFFile(
+            reference_mesh.comm,
+            os.path.join(errors_dir, f"phi_p_error_{str(i).zfill(2)}.xdmf"),
+            "w",
+        ) as of:
+            of.write_mesh(mesh)
+            of.write_function(coarse_phi_p_norm)
+
+        assert not np.any(np.isnan(ref_phi_p_norm.x.array)), (
+            "ref_phi_p_norm.x.array contains NaNs."
+        )
+        phi_p_err_sqd = ref_phi_p_norm.x.array.sum()
+
+        results["phi_p_error"][i] = np.sqrt(phi_p_err_sqd)
+
+        write_log(prefix + "Compute phi error.")
+        ref_phi_norm, coarse_phi_norm = compute_phi_error(
+            solution_p_2_ref,
+            reference_levelset,
             coarse_levelset_2_ref,
             dg0_coarse_h_T_2_ref,
             dg0_cut_indicator_2_ref,
             ref_dg0_space,
+            dg0_space,
         )
 
         with XDMFFile(
-            reference_mesh.comm, os.path.join(errors_dir, "ref_l2_p_error.xdmf"), "w"
+            reference_mesh.comm,
+            os.path.join(errors_dir, f"ref_phi_error_{str(i).zfill(2)}.xdmf"),
+            "w",
         ) as of:
             of.write_mesh(reference_mesh)
-            of.write_function(ref_l2_p_err)
+            of.write_function(coarse_phi_norm)
 
-        assert not np.any(np.isnan(ref_l2_p_err.x.array)), (
-            "ref_l2_p_err.x.array contains NaNs."
+        phi_err_sqd = ref_phi_norm.x.array.sum()
+        results["phi_error"][i] = np.sqrt(phi_err_sqd)
+
+        assert not np.any(np.isnan(ref_phi_norm.x.array)), (
+            "ref_phi_norm.x.array contains NaNs."
         )
-        plot_scalar(
-            ref_l2_p_err, os.path.join(errors_dir, f"l2_p_err_{str(i).zfill(2)}")
-        )
-        l2_p_err_sqd = ref_l2_p_err.x.array.sum()
 
-        results["l2_p_error"][i] = np.sqrt(l2_p_err_sqd)
+        triple_norm_err_sqd = h10_err_sqd
+        triple_norm_err_sqd += l2_err_sqd
+        triple_norm_err_sqd += phi_p_err_sqd
+        triple_norm_err_sqd += phi_err_sqd
 
-    # Source term oscillations estimation
-    # Dirichlet data oscillations estimation
-    if exact_solution_available:
-        x = ufl.SpatialCoordinate(mesh)
-        coarse_ref_solution = ref_solution(x)
-        fh = -ufl.div(ufl.grad(coarse_ref_solution))
-        gh = coarse_ref_solution
-        dirichlet_data = generate_exact_solution(np)
+        results["triple_norm_error"][i] = np.sqrt(triple_norm_err_sqd)
     else:
-        fh = dfx.fem.Function(fe_space)
-        fh.interpolate(source_term)
-        dirichlet_data = generate_dirichlet_data(np)
-
-    gh = dfx.fem.Function(fe_space)
-    gh.interpolate(dirichlet_data)
-
-    """
-    ref_osc_f, coarse_osc_f = compute_source_term_oscillations(
-        fh,
-        ref_f,
-        dg0_coarse_h_T_2_ref,
-        ref_dg0_space,
-        dg0_space,
-        fe_space,
-        reference_space,
-    )
-
-    plot_scalar(
-        coarse_osc_f, os.path.join(errors_dir, f"source_term_osc_{str(i).zfill(2)}")
-    )
-    results["source_term_osc"][i] = np.sqrt(ref_osc_f.x.array.sum())
-
-    ref_osc_g, coarse_osc_g = compute_dirichlet_oscillations(
-        gh,
-        ref_g,
-        ref_dg0_space,
-        dg0_space,
-        dg0_cut_indicator_2_ref,
-        fe_space,
-        reference_space,
-    )
-
-    results["dirichlet_data_osc"][i] = np.sqrt(ref_osc_g.x.array.sum())
-    """
-
-    if phifem:
-        if compute_xi_ref:
-            xi_ref_h10, xi_ref_l2 = compute_xi_h10_l2(
-                solution_u_2_ref, ref_g, dg0_coarse_h_T_2_ref, ref_dg0_space
-            )
-
-            results["xi_h10"][i] = np.sqrt(xi_ref_h10.x.array.sum())
-            results["xi_l2"][i] = np.sqrt(xi_ref_l2.x.array.sum())
-        else:
-            xi_ref_h10 = dfx.fem.Function(ref_dg0_space)
-            xi_ref_l2 = dfx.fem.Function(ref_dg0_space)
-        results["triple_norm_error"][i] = np.sqrt(h10_err_sqd + l2_p_err_sqd)
-        # results["total_error"][i] = np.sqrt(
-        #     h10_err_sqd
-        #     + l2_p_err_sqd
-        #     + ref_osc_f.x.array.sum()
-        #     + ref_osc_g.x.array.sum()
-        #     + xi_ref_h10.x.array.sum()
-        #     + xi_ref_l2.x.array.sum()
-        # )
-        results["total_error"][i] = np.sqrt(
-            h10_err_sqd
-            + l2_p_err_sqd
-            + xi_ref_h10.x.array.sum()
-            + xi_ref_l2.x.array.sum()
-        )
-    else:
-        results["total_error"][i] = results["error"][i]
+        results["triple_norm_error"][i] = np.nan
 
     df = pl.DataFrame(results)
     header = f"======================================================================================================\n{prefix}\n======================================================================================================"

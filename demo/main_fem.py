@@ -13,11 +13,11 @@ from basix.ufl import element
 
 sys.path.append("../")
 
-from plots import plot_mesh, plot_scalar
 from utils import (
     fem_solve,
     marking,
     residual_estimation,
+    save_function,
     write_log,
 )
 
@@ -64,7 +64,7 @@ for dir_path in dirs:
 
 sys.path.append(source_dir)
 
-from data import gen_mesh
+from data import INITIAL_MESH_SIZE, MAXIMUM_DOF, gen_mesh
 
 exact_solution_available = False
 try:
@@ -84,8 +84,8 @@ if not exact_solution_available:
 with open(os.path.join(source_dir, parameters_name + ".yaml"), "rb") as f:
     parameters = yaml.safe_load(f)
 
-initial_mesh_size = parameters["initial_mesh_size"]
-max_dof = float(parameters["maximum_dof"])
+initial_mesh_size = INITIAL_MESH_SIZE
+max_dof = float(MAXIMUM_DOF)
 fe_degree = parameters["finite_element_degree"]
 dorfler_param = parameters["marking_parameter"]
 refinement = parameters["refinement"]
@@ -105,8 +105,8 @@ results = {
     "iteration": [],
     "dof": [],
     "estimator": [],
-    "eta_T": [],
-    "eta_E": [],
+    "eta_r": [],
+    "eta_J": [],
 }
 
 num_dof = 0
@@ -119,12 +119,6 @@ while stopping_criterion:
     else:
         stopping_criterion = num_dof < max_dof
     prefix = f"FEM | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
-    plot_mesh(
-        mesh,
-        os.path.join(meshes_dir, f"mesh_{str(i).zfill(2)}"),
-        wireframe=True,
-        linewidth=1.5,
-    )
     results["iteration"].append(i)
     fe_space = dfx.fem.functionspace(mesh, fe_element)
 
@@ -152,16 +146,13 @@ while stopping_criterion:
     write_log(prefix + "FEM solve.")
     solution = fem_solve(fe_space, fh, gh)
 
+    if not curved:
+        save_function(
+            solution, os.path.join(solutions_dir, f"solution_u_{str(i).zfill(2)}")
+        )
     checkpoint_file = os.path.join(checkpoint_dir, f"checkpoint_{str(i).zfill(2)}.bp")
     adios4dolfinx.write_mesh(checkpoint_file, mesh)
     adios4dolfinx.write_function(checkpoint_file, solution, name="solution_u")
-
-    plot_scalar(solution, os.path.join(solutions_dir, f"solution_{str(i).zfill(2)}"))
-    plot_scalar(
-        solution,
-        os.path.join(solutions_dir, f"solution_{str(i).zfill(2)}"),
-        warp_by_scalar=True,
-    )
 
     dx = ufl.Measure("dx", domain=mesh)
     dS = ufl.Measure("dS", domain=mesh)
@@ -171,17 +162,10 @@ while stopping_criterion:
 
     est_h = dfx.fem.Function(dg0_space)
     for name, eta in eta_dict.items():
-        plot_scalar(eta, os.path.join(etas_dir, name + f"_{str(i).zfill(2)}"))
-
         results[name].append(np.sqrt(eta.x.array.sum()))
         est_h.x.array[:] += eta.x.array[:]
 
     results["estimator"].append(np.sqrt(est_h.x.array.sum()))
-
-    plot_scalar(
-        est_h,
-        os.path.join(estimators_dir, f"estimator_{str(i).zfill(2)}"),
-    )
 
     df = pl.DataFrame(results)
     header = f"======================================================================================================\n{prefix}\n======================================================================================================"

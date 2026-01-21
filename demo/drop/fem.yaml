@@ -1,6 +1,6 @@
 # Drop test case
-initial_mesh_size: 0.1
-maximum_dof: 1e6
+initial_mesh_size: 0.5
+
 refinement: "adap"
 mesh_type: "sub"
 finite_element_degree: 1
