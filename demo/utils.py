@@ -396,23 +396,23 @@ def residual_estimation(
     n = ufl.FacetNormal(mesh)
 
     k = solution_u.function_space.element.basix_element.degree
-    # quadrature_degree_cells = max(0, k - 2)
-    # quadrature_degree_facets = max(0, k - 1)
-    #
-    # dx_est = dx.reconstruct(
-    # metadata={"quadrature_degree": quadrature_degree_cells},
-    # )
-    # dS_est = dS.reconstruct(
-    # metadata={"quadrature_degree": quadrature_degree_facets},
-    # )
+    quadrature_degree_cells = max(0, k - 2)
+    quadrature_degree_facets = max(0, k - 1)
+
+    dx_est = dx.reconstruct(
+        metadata={"quadrature_degree": quadrature_degree_cells},
+    )
+    dS_est = dS.reconstruct(
+        metadata={"quadrature_degree": quadrature_degree_facets},
+    )
 
     rh = fh + delta(solution_u)
     Jh = ufl.jump(ufl.grad(solution_u), -n)
 
     w0 = ufl.TestFunction(dg0_space)
 
-    eta_r = h_T**2 * ufl.inner(ufl.inner(rh, rh), w0) * dx
-    eta_J = ufl.avg(h_T) * ufl.inner(ufl.inner(Jh, Jh), ufl.avg(w0)) * dS
+    eta_r = h_T**2 * ufl.inner(ufl.inner(rh, rh), w0) * dx_est
+    eta_J = ufl.avg(h_T) * ufl.inner(ufl.inner(Jh, Jh), ufl.avg(w0)) * dS_est
 
     eta_dict = {"eta_r": eta_r, "eta_J": eta_J}
 
