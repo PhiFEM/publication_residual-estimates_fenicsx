@@ -64,7 +64,7 @@ for dir_path in dirs:
 
 sys.path.append(source_dir)
 
-from data import gen_mesh
+from data import INITIAL_MESH_SIZE, MAXIMUM_DOF, gen_mesh
 
 exact_solution_available = False
 try:
@@ -84,8 +84,8 @@ if not exact_solution_available:
 with open(os.path.join(source_dir, parameters_name + ".yaml"), "rb") as f:
     parameters = yaml.safe_load(f)
 
-initial_mesh_size = parameters["initial_mesh_size"]
-max_dof = float(parameters["maximum_dof"])
+initial_mesh_size = INITIAL_MESH_SIZE
+max_dof = float(MAXIMUM_DOF)
 fe_degree = parameters["finite_element_degree"]
 dorfler_param = parameters["marking_parameter"]
 refinement = parameters["refinement"]

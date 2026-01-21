@@ -79,7 +79,7 @@ for dir_path in dirs:
 
 sys.path.append(source_dir)
 
-from data import generate_levelset
+from data import INITIAL_MESH_SIZE, MAXIMUM_DOF, generate_levelset
 
 exact_solution_available = False
 try:
@@ -103,8 +103,8 @@ except ImportError:
 with open(os.path.join(source_dir, parameters_name + ".yaml"), "rb") as f:
     parameters = yaml.safe_load(f)
 
-initial_mesh_size = parameters["initial_mesh_size"]
-max_dof = float(parameters["maximum_dof"])
+initial_mesh_size = INITIAL_MESH_SIZE
+max_dof = MAXIMUM_DOF
 fe_degree = parameters["finite_element_degree"]
 levelset_degree = parameters["levelset_degree"]
 solution_degree = parameters["solution_degree"]

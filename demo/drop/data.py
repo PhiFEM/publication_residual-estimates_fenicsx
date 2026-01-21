@@ -5,13 +5,15 @@ from mpi4py import MPI
 from netgen.geom2d import SplineGeometry
 
 _angle = -np.pi / 16.0
+INITIAL_MESH_SIZE = 0.1
+MAXIMUM_DOF = 5.0e4
 
 
 def _rotate(x, angle):
     _sine_angle = np.sin(angle)
     _cosine_angle = np.cos(angle)
 
-    rot_x = np.zeros((2, x.shape[1]))
+    rot_x = np.zeros_like(x)
     rot_x[0] = _cosine_angle * x[0] + _sine_angle * x[1]
     rot_x[1] = -_sine_angle * x[0] + _cosine_angle * x[1]
     return rot_x
@@ -81,7 +83,7 @@ def gen_mesh(hmax, curved=False):
         (-1.0, -1.0),
     ]
     for i, pt in enumerate(pnts):
-        rot_pt = _rotate([pt[0], pt[1]], -_angle)
+        rot_pt = _rotate(np.asarray([pt[0], pt[1]]), -_angle)
         pnts[i] = (float(rot_pt[0]), float(rot_pt[1]))
 
     pts = [geo.AppendPoint(*pnt) for pnt in pnts]

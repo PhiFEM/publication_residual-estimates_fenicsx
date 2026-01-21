@@ -1,47 +1,41 @@
 phifem: 
   name: "$\\varphi$-FEM, $\\eta_1$"
   marker: "p"
+  color: "#abd9e9"
 phifem-bc:
   name: "$\\varphi$-FEM, $\\eta_3$"
-  marker: "s"
+  marker: "d"
+  color: "#fdae61"
 phifem-geo:
   name: "$\\varphi$-FEM, $\\eta_2$"
   marker: "*"
+  color: "#ffffbf"
 phifem-bc-geo:
   name: "$\\varphi$-FEM, $\\eta$"
   marker: "^"
-phifem-bc-geo-no-sl:
-  name: "$\\varphi$-FEM (no sl), $\\eta$"
-  marker: "."
-phifem_3:
-  name: "$\\varphi$-FEM, $\\eta$ (DG0 $p$)"
-  marker: "v"
+  color: "#d7191c"
 fem:
   name: "FEM, $\\eta_1$"
   marker: "o"
+  color: "#2c7bb6"
 reference:
   name: "Curved FEM, $\\eta_1$"
   marker: "o"
 estimator:
   name: "$\\eta$"
   line: "--"
-  color: "#e41a1c"
 h10_error:
   name: "$|e|_{1,\\Omega}$"
   line: "-"
-  color: "#377eb8"
 triple_norm_error:
   name: "$E$"
   line: "-."
-  color: "#4daf4a"
 l2_error:
   name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|u - u_h\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
   line: "-"
-  color: "#984ea3"
 phi_p_error:
   name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|p\\varphi - p_h\\varphi_h\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
   line: "-"
-  color: "#762a83"
 phi_error:
   name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|p_h(\\varphi - \\varphi_h)\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
   line: "-"
@@ -65,4 +59,4 @@ eta_geo:
 meshtags:
   cells: ["#2166ac", "#ef8a62", "#b2182b"]
   facets: ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#ffff33"]
-legend_text_size: 12
+legend_text_size: 10

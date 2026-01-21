@@ -71,7 +71,10 @@ for parameter in parameters_list:
         else:
             label = rf"{d_name} ({scheme_name})"
         lstyle = plot_param[d]["line"]
-        color = plot_param[d]["color"]
+        if eta_comp:
+            color = plot_param[d]["color"]
+        else:
+            color = plot_param[param_name]["color"]
         xs = df["dof"].to_numpy()
         try:
             ys = df[d].to_numpy()

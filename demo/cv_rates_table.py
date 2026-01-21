@@ -71,8 +71,6 @@ with open(tex_template_path, "r") as f:
             d_name = plot_param[d]["name"]
             if d == "estimator":
                 d_name = scheme_name.split(sep=" ")[1][1:-1]
-            lstyle = plot_param[d]["line"]
-            color = plot_param[d]["color"]
             xs = df["dof"].to_numpy()
             try:
                 ys = df[d].to_numpy()
