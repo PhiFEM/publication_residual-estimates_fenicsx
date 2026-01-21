@@ -1,0 +1,13 @@
+\begin{table}
+\centering
+\small
+\begin{tabular}{r c c c c c c c c}
+\toprule
+\textbf{Scheme}                       & \textbf{Estimator}         & $\bm{|e|_{1,\Omega}}$     & $\bm{E}$                          & $\bm{\eta_r}$         & $\bm{\eta_J}$         & $\bm{\eta_{\mathrm{BC}}}$ & $\bm{\eta_{0,\mathrm{geo}}}$ \\ \midrule
+\textbf{FEM,} $\bm{\eta_1}$           & [fem-estimator]            & [fem-h10_error]           & $\varnothing$                     & [fem-eta_r]           & [fem-eta_J]           & $\varnothing$             & $\varnothing$                \\ \midrule
+\textbf{$\varphi$-FEM,} $\bm{\eta}$   & [phifem-bc-geo-estimator]  & [phifem-bc-geo-h10_error] & [phifem-bc-geo-triple_norm_error] & [phifem-bc-geo-eta_r] & [phifem-bc-geo-eta_J] & [phifem-bc-geo-eta_BC]    & [phifem-bc-geo-eta_geo]      \\ \midrule
+\textbf{$\varphi$-FEM,} $\bm{\eta_1}$ & [phifem-estimator]         & [phifem-h10_error]        & [phifem-triple_norm_error]        & [phifem-eta_r]        & [phifem-eta_J]        & $\varnothing$             & $\varnothing$                \\ \midrule
+\end{tabular}
+\caption{}
+\label{tab:}
+\end{table}
