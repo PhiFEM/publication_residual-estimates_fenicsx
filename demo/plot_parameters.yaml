@@ -1,59 +1,64 @@
 phifem: 
   name: "$\\varphi$-FEM, $\\eta_1$"
-  marker: "p"
   color: "#abd9e9"
 phifem-bc:
   name: "$\\varphi$-FEM, $\\eta_3$"
-  marker: "d"
   color: "#fdae61"
 phifem-geo:
   name: "$\\varphi$-FEM, $\\eta_2$"
-  marker: "*"
   color: "#ffffbf"
 phifem-bc-geo:
   name: "$\\varphi$-FEM, $\\eta$"
-  marker: "^"
   color: "#d7191c"
 fem:
   name: "FEM, $\\eta_1$"
-  marker: "o"
   color: "#2c7bb6"
 reference:
   name: "Curved FEM, $\\eta_1$"
   marker: "o"
 estimator:
   name: "$\\eta$"
+  marker: "p"
   line: "--"
 h10_error:
   name: "$|e|_{1,\\Omega}$"
+  marker: "d"
   line: "-"
 triple_norm_error:
   name: "$E$"
+  marker: "x"
   line: "-."
 l2_error:
   name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|u - u_h\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
+  marker: "^"
   line: "-"
 phi_p_error:
   name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|p\\varphi - p_h\\varphi_h\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
+  marker: "*"
   line: "-"
 phi_error:
   name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|p_h(\\varphi - \\varphi_h)\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
+  marker: "o"
   line: "-"
   color: "#af8dc3"
 eta_r:
   name: "$\\eta_r$"
+  marker: "^"
   line: "-."
   color: "#8dd3c7"
 eta_J:
   name: "$\\eta_J$"
+  marker: "^"
   line: "-."
   color: "#fb8072"
 eta_BC:
   name: "$\\eta_{\\mathrm{BC}}$"
+  marker: "^"
   line: "-."
   color: "#b3de69"
 eta_geo:
   name: "$\\eta_{\\mathrm{geo}}$"
+  marker: "^"
   line: "-."
   color: "#fccde5"
 meshtags:

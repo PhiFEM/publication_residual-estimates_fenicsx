@@ -45,7 +45,6 @@ eta_comp = np.all(["eta" in data for data in data_list])
 for parameter in parameters_list:
     demo, param_name = parameter.split(sep="/")
 
-    mstyle = plot_param[param_name]["marker"]
     parameter_names.append(param_name)
     with open(os.path.join(parameter + ".yaml"), "rb") as f:
         parameters = yaml.safe_load(f)
@@ -66,6 +65,7 @@ for parameter in parameters_list:
     df = pl.read_csv(data_path)
     for d in data_list:
         d_name = plot_param[d]["name"]
+        mstyle = plot_param[d]["marker"]
         if eta_comp:
             label = rf"{d_name}"
         else:
