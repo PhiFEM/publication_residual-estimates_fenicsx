@@ -64,7 +64,10 @@ for parameter in parameters_list:
 
     df = pl.read_csv(data_path)
     for d in data_list:
-        d_name = plot_param[d]["name"]
+        if d == "estimator":
+            d_name = plot_param[param_name]["estimator_name"]
+        else:
+            d_name = plot_param[d]["name"]
         mstyle = plot_param[d]["marker"]
         if eta_comp:
             label = rf"{d_name}"

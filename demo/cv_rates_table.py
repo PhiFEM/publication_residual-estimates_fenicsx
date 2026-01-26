@@ -68,9 +68,10 @@ with open(tex_template_path, "r") as f:
 
         df = pl.read_csv(data_path)
         for d in data_list:
-            d_name = plot_param[d]["name"]
             if d == "estimator":
                 d_name = scheme_name.split(sep=" ")[1][1:-1]
+            else:
+                d_name = plot_param[d]["name"]
             xs = df["dof"].to_numpy()
             try:
                 ys = df[d].to_numpy()

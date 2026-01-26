@@ -1,23 +1,27 @@
 phifem: 
-  name: "$\\varphi$-FEM, $\\eta_1$"
+  name: "$\\varphi$-FEM, $\\eta_{\\overline{\\mathrm{BC}}{,}\\overline{\\mathrm{geo}}}$"
+  estimator_name: "$\\eta_{\\overline{\\mathrm{BC}}{,}\\overline{\\mathrm{geo}}}$"
   color: "#abd9e9"
 phifem-bc:
-  name: "$\\varphi$-FEM, $\\eta_3$"
+  name: "$\\varphi$-FEM, $\\eta_{\\overline{\\mathrm{geo}}}$"
+  estimator_name: "$\\eta_{\\overline{\\mathrm{geo}}}$"
   color: "#fdae61"
 phifem-geo:
-  name: "$\\varphi$-FEM, $\\eta_2$"
+  name: "$\\varphi$-FEM, $\\eta_{\\overline{\\mathrm{BC}}}$"
+  estimator_name: "$\\eta_{\\overline{\\mathrm{BC}}}$"
   color: "#ffffbf"
 phifem-bc-geo:
   name: "$\\varphi$-FEM, $\\eta$"
+  estimator_name: "$\\eta$"
   color: "#d7191c"
 fem:
-  name: "FEM, $\\eta_1$"
+  name: "FEM, $\\eta_{\\overline{\\mathrm{BC}}{,}\\overline{\\mathrm{geo}}}$"
+  estimator_name: "$\\eta_{\\overline{\\mathrm{BC}}{,}\\overline{\\mathrm{geo}}}$"
   color: "#2c7bb6"
 reference:
-  name: "Curved FEM, $\\eta_1$"
+  name: "Curved FEM, $\\eta_{\\overline{\\mathrm{BC}}{,}\\overline{\\mathrm{geo}}}$"
   marker: "o"
 estimator:
-  name: "$\\eta$"
   marker: "p"
   line: "--"
 h10_error:
