@@ -237,8 +237,8 @@ while num_dof < max_dof:
     u_space = dfx.fem.functionspace(mesh, fe_element)
 
     if not exact_solution_available:
-        source_term = generate_source_term(np)
         dirichlet_data = generate_dirichlet_data(np)
+        source_term = generate_source_term(np)
         fh = dfx.fem.Function(u_space)
         fh.interpolate(source_term)
         gh = dfx.fem.Function(u_space)
@@ -256,6 +256,7 @@ while num_dof < max_dof:
     else:
         x = ufl.SpatialCoordinate(mesh)
         exact_solution = generate_exact_solution(ufl)(x)
+        dirichlet_data = generate_exact_solution(np)
         fh = -ufl.div(ufl.grad(exact_solution))
         gh = exact_solution
 
@@ -303,7 +304,14 @@ while num_dof < max_dof:
         write_log(prefix + "Computation boundary estimator.")
         eta_dict["eta_geo"], parent_cells_tags, fine_mesh = (
             compute_boundary_local_estimators(
-                mesh, solution, levelset, phih, cells_tags, dual=True
+                mesh,
+                solution_u,
+                solution_p,
+                dirichlet_data,
+                levelset,
+                phih,
+                cells_tags,
+                dual=True,
             )
         )
         if plot:

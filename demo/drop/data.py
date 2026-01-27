@@ -6,7 +6,7 @@ from netgen.geom2d import SplineGeometry
 
 _angle = -np.pi / 16.0
 INITIAL_MESH_SIZE = 0.1
-MAXIMUM_DOF = 5.0e4
+MAXIMUM_DOF = 5.0e5
 
 
 def _rotate(x, angle):

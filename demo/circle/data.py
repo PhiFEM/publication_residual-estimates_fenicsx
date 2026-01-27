@@ -3,7 +3,7 @@ from mpi4py import MPI
 from netgen.geom2d import SplineGeometry
 
 INITIAL_MESH_SIZE = 0.1
-MAXIMUM_DOF = 5.0e4
+MAXIMUM_DOF = 5.0e5
 
 
 def generate_levelset(mode):

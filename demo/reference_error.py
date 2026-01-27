@@ -17,6 +17,7 @@ sys.path.append("../")
 
 from utils import (
     cell_diameter,
+    compute_boundary_error,
     compute_h10_error,
     compute_l2_error,
     compute_phi_error,
@@ -136,7 +137,7 @@ if not exact_solution_available:
     dirichlet_data = generate_dirichlet_data(np)
 
     # Load reference solution
-    reference_solution = dfx.fem.Function(reference_space)
+    ref_solution_h = dfx.fem.Function(reference_space)
     adios4dolfinx.read_function(
         os.path.join(
             source_dir,
@@ -144,15 +145,18 @@ if not exact_solution_available:
             "checkpoints",
             f"checkpoint_{str(ref_max_iteration).zfill(2)}.bp",
         ),
-        reference_solution,
+        ref_solution_h,
         name="solution_u",
     )
 else:
     write_log("Interpolate analytical solution.")
     ref_solution = generate_exact_solution(ufl)
     ref_x = ufl.SpatialCoordinate(reference_mesh)
-    reference_solution = ref_solution(ref_x)
+    ref_solution_h = ref_solution(ref_x)
     dirichlet_data = generate_exact_solution(np)
+    ref_soluton_np = generate_exact_solution(np)
+    ref_solution_h = dfx.fem.Function(reference_space)
+    ref_solution_h.interpolate(ref_soluton_np)
 
 ref_g = dfx.fem.Function(reference_space)
 ref_g.interpolate(dirichlet_data)
@@ -166,8 +170,9 @@ if phifem:
 results = pl.read_csv(os.path.join(output_dir, "results.csv")).to_dict()
 results["h10_error"] = [np.nan] * iterations_num
 results["l2_error"] = [np.nan] * iterations_num
-results["phi_p_error"] = [np.nan] * iterations_num
-results["phi_error"] = [np.nan] * iterations_num
+results["boundary_error"] = [np.nan] * iterations_num
+# results["phi_p_error"] = [np.nan] * iterations_num
+# results["phi_error"] = [np.nan] * iterations_num
 results["triple_norm_error"] = [np.nan] * iterations_num
 
 for i in range(iterations_num):
@@ -190,6 +195,8 @@ for i in range(iterations_num):
     dg0_space = dfx.fem.functionspace(mesh, dg0_element)
     solution_u = dfx.fem.Function(fe_space)
     solution_p = dfx.fem.Function(aux_space)
+    coarse_g_h = dfx.fem.Function(fe_space)
+    coarse_g_h.interpolate(dirichlet_data)
 
     write_log(prefix + "Load solution_u.")
     adios4dolfinx.read_function(
@@ -266,11 +273,13 @@ for i in range(iterations_num):
     # Interpolate coarse functions to ref spaces
     solution_u_2_ref = dfx.fem.Function(reference_space)
     solution_u_2_ref.interpolate_nonmatching(solution_u, reference_cells, nmm_fe2ref)
+    coarse_g_h_2_ref = dfx.fem.Function(reference_space)
+    coarse_g_h_2_ref.interpolate_nonmatching(coarse_g_h, reference_cells, nmm_fe2ref)
 
     # Compute reference H10 error
     write_log(prefix + "Compute H10 error.")
     ref_h10_norm, coarse_h10_norm = compute_h10_error(
-        solution_u_2_ref, reference_solution, ref_dg0_space, dg0_space
+        solution_u_2_ref, ref_solution_h, ref_dg0_space, dg0_space
     )
 
     with XDMFFile(
@@ -288,7 +297,7 @@ for i in range(iterations_num):
         write_log(prefix + "Compute L2 error.")
         ref_l2_norm, coarse_l2_norm = compute_l2_error(
             solution_u_2_ref,
-            reference_solution,
+            ref_solution_h,
             ref_dg0_space,
             dg0_space,
             dg0_coarse_h_T_2_ref,
@@ -306,64 +315,91 @@ for i in range(iterations_num):
         l2_err_sqd = ref_l2_norm.x.array.sum()
         results["l2_error"][i] = np.sqrt(l2_err_sqd)
 
-        write_log(prefix + "Compute L2 phi p error.")
-        ref_phi_p_norm, coarse_phi_p_norm = compute_phi_p_error(
-            solution_p_2_ref,
-            reference_solution,
-            ref_g,
-            ref_dg0_space,
-            dg0_space,
+        ref_boundary_error_norm, coarse_boundary_error_norm = compute_boundary_error(
+            ref_solution_h,
             coarse_levelset_2_ref,
-            reference_levelset,
-            dg0_coarse_h_T_2_ref,
+            solution_p_2_ref,
+            coarse_g_h_2_ref,
+            ref_dg0_space,
             dg0_cut_indicator_2_ref,
+            dg0_coarse_h_T_2_ref,
+            dg0_space,
         )
 
         with XDMFFile(
             reference_mesh.comm,
-            os.path.join(errors_dir, f"phi_p_error_{str(i).zfill(2)}.xdmf"),
+            os.path.join(errors_dir, f"boundary_error_{str(i).zfill(2)}.xdmf"),
             "w",
         ) as of:
             of.write_mesh(mesh)
-            of.write_function(coarse_phi_p_norm)
+            of.write_function(coarse_boundary_error_norm)
 
-        assert not np.any(np.isnan(ref_phi_p_norm.x.array)), (
+        assert not np.any(np.isnan(ref_boundary_error_norm.x.array)), (
             "ref_phi_p_norm.x.array contains NaNs."
         )
-        phi_p_err_sqd = ref_phi_p_norm.x.array.sum()
+        boundary_err_sqd = ref_boundary_error_norm.x.array.sum()
 
-        results["phi_p_error"][i] = np.sqrt(phi_p_err_sqd)
+        results["boundary_error"][i] = np.sqrt(boundary_err_sqd)
 
-        write_log(prefix + "Compute phi error.")
-        ref_phi_norm, coarse_phi_norm = compute_phi_error(
-            solution_p_2_ref,
-            reference_levelset,
-            coarse_levelset_2_ref,
-            dg0_coarse_h_T_2_ref,
-            dg0_cut_indicator_2_ref,
-            ref_dg0_space,
-            dg0_space,
-        )
+        # write_log(prefix + "Compute L2 phi p error.")
+        # ref_phi_p_norm, coarse_phi_p_norm = compute_phi_p_error(
+        #     solution_p_2_ref,
+        #     reference_solution,
+        #     ref_g,
+        #     ref_dg0_space,
+        #     dg0_space,
+        #     coarse_levelset_2_ref,
+        #     reference_levelset,
+        #     dg0_coarse_h_T_2_ref,
+        #     dg0_cut_indicator_2_ref,
+        # )
 
-        with XDMFFile(
-            reference_mesh.comm,
-            os.path.join(errors_dir, f"ref_phi_error_{str(i).zfill(2)}.xdmf"),
-            "w",
-        ) as of:
-            of.write_mesh(reference_mesh)
-            of.write_function(coarse_phi_norm)
+        # with XDMFFile(
+        #     reference_mesh.comm,
+        #     os.path.join(errors_dir, f"phi_p_error_{str(i).zfill(2)}.xdmf"),
+        #     "w",
+        # ) as of:
+        #     of.write_mesh(mesh)
+        #     of.write_function(coarse_phi_p_norm)
 
-        phi_err_sqd = ref_phi_norm.x.array.sum()
-        results["phi_error"][i] = np.sqrt(phi_err_sqd)
+        # assert not np.any(np.isnan(ref_phi_p_norm.x.array)), (
+        #     "ref_phi_p_norm.x.array contains NaNs."
+        # )
+        # phi_p_err_sqd = ref_phi_p_norm.x.array.sum()
 
-        assert not np.any(np.isnan(ref_phi_norm.x.array)), (
-            "ref_phi_norm.x.array contains NaNs."
-        )
+        # results["phi_p_error"][i] = np.sqrt(phi_p_err_sqd)
+
+        # write_log(prefix + "Compute phi error.")
+        # ref_phi_norm, coarse_phi_norm = compute_phi_error(
+        #     solution_p_2_ref,
+        #     reference_levelset,
+        #     coarse_levelset_2_ref,
+        #     dg0_coarse_h_T_2_ref,
+        #     dg0_cut_indicator_2_ref,
+        #     ref_dg0_space,
+        #     dg0_space,
+        # )
+
+        # with XDMFFile(
+        #     reference_mesh.comm,
+        #     os.path.join(errors_dir, f"ref_phi_error_{str(i).zfill(2)}.xdmf"),
+        #     "w",
+        # ) as of:
+        #     of.write_mesh(reference_mesh)
+        #     of.write_function(coarse_phi_norm)
+
+        # phi_err_sqd = ref_phi_norm.x.array.sum()
+        # results["phi_error"][i] = np.sqrt(phi_err_sqd)
+
+        # assert not np.any(np.isnan(ref_phi_norm.x.array)), (
+        #     "ref_phi_norm.x.array contains NaNs."
+        # )
 
         triple_norm_err_sqd = h10_err_sqd
         triple_norm_err_sqd += l2_err_sqd
-        triple_norm_err_sqd += phi_p_err_sqd
-        triple_norm_err_sqd += phi_err_sqd
+        triple_norm_err_sqd += boundary_err_sqd
+        # triple_norm_err_sqd += phi_p_err_sqd
+        # triple_norm_err_sqd += phi_err_sqd
 
         results["triple_norm_error"][i] = np.sqrt(triple_norm_err_sqd)
     else:
