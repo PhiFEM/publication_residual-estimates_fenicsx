@@ -558,8 +558,10 @@ def compute_phi_p_error(
     coarse_h_T_2_ref,
     coarse_cut_indicator_2_ref,
 ):
-    ref_p = ref_solution - ref_g
-    phi_p_error = ref_p * ref_levelset - coarse_solution_p_2_ref * coarse_levelset_2_ref
+    # ref_p = ref_solution - ref_g
+    phi_p_error = (
+        coarse_solution_p_2_ref - coarse_solution_p_2_ref * coarse_levelset_2_ref
+    )
 
     ref_v0 = ufl.TestFunction(ref_dg0_space)
 
