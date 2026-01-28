@@ -599,10 +599,14 @@ def compute_boundary_error(
     boundary_err_h1_vec = dfx.fem.assemble_vector(boundary_error_h1_norm_form)
 
     ref_boundary_error_norm = dfx.fem.Function(ref_dg0_space)
+    ref_boundary_error_h1_norm = dfx.fem.Function(ref_dg0_space)
+    ref_boundary_error_l2_norm = dfx.fem.Function(ref_dg0_space)
     # We replace eventual NaN values with zero.
     ref_boundary_error_norm.x.array[:] = np.nan_to_num(
         boundary_err_l2_vec.array[:], copy=False, nan=0.0
     ) + np.nan_to_num(boundary_err_h1_vec.array[:], copy=False, nan=0.0)
+    ref_boundary_error_l2_norm.x.array[:] = boundary_err_l2_vec.array[:]
+    ref_boundary_error_h1_norm.x.array[:] = boundary_err_h1_vec.array[:]
 
     coarse_boundary_error_norm = None
     try:
@@ -620,7 +624,12 @@ def compute_boundary_error(
     except RuntimeError:
         print("Failed to interpolate l2_norm to coarse space.")
         pass
-    return ref_boundary_error_norm, coarse_boundary_error_norm
+    return (
+        ref_boundary_error_norm,
+        coarse_boundary_error_norm,
+        ref_boundary_error_l2_norm,
+        ref_boundary_error_h1_norm,
+    )
 
 
 def compute_phi_p_error(

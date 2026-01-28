@@ -315,7 +315,12 @@ for i in range(iterations_num):
         l2_err_sqd = ref_l2_norm.x.array.sum()
         results["l2_error"][i] = np.sqrt(l2_err_sqd)
 
-        ref_boundary_error_norm, coarse_boundary_error_norm = compute_boundary_error(
+        (
+            ref_boundary_error_norm,
+            coarse_boundary_error_norm,
+            ref_boundary_error_l2_norm,
+            ref_boundary_error_h1_norm,
+        ) = compute_boundary_error(
             ref_solution_h,
             coarse_levelset_2_ref,
             solution_p_2_ref,
@@ -338,8 +343,12 @@ for i in range(iterations_num):
             "ref_phi_p_norm.x.array contains NaNs."
         )
         boundary_err_sqd = ref_boundary_error_norm.x.array.sum()
+        boundary_err_l2_sqd = ref_boundary_error_l2_norm.x.array.sum()
+        boundary_err_h1_sqd = ref_boundary_error_h1_norm.x.array.sum()
 
         results["boundary_error"][i] = np.sqrt(boundary_err_sqd)
+        results["boundary_error_l2"][i] = np.sqrt(boundary_err_l2_sqd)
+        results["boundary_error_h1"][i] = np.sqrt(boundary_err_h1_sqd)
 
         # write_log(prefix + "Compute L2 phi p error.")
         # ref_phi_p_norm, coarse_phi_p_norm = compute_phi_p_error(
