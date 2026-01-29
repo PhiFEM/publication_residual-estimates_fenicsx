@@ -20,9 +20,10 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "trunc",
+    "-t",
+    "--trunc",
     type=int,
-    default=1,
+    default=0,
     help="Truncation of the top of the data to be plotted.",
 )
 
@@ -94,25 +95,45 @@ for parameter in parameters_list:
         if ys_not_zero:
             if rate:
                 trunc_btm = -np.maximum(-(trunc_top - 5), 0)
-                a, b = np.polyfit(
-                    np.log(xs[trunc_btm:trunc_top]),
-                    np.log(ys[trunc_btm:trunc_top]),
-                    deg=1,
-                )
+                if trunc_top == 0:
+                    a, b = np.polyfit(
+                        np.log(xs[trunc_btm:]),
+                        np.log(ys[trunc_btm:]),
+                        deg=1,
+                    )
+                else:
+                    a, b = np.polyfit(
+                        np.log(xs[trunc_btm:trunc_top]),
+                        np.log(ys[trunc_btm:trunc_top]),
+                        deg=1,
+                    )
                 rate = " (s=" + str(np.round(a, 1)) + ")"
             else:
                 rate = ""
-            plt.loglog(
-                xs[:trunc_top],
-                ys[:trunc_top],
-                lstyle + mstyle,
-                c=color,
-                label=label + rate,
-                path_effects=[
-                    pe.Stroke(linewidth=2.5, foreground="#252525"),
-                    pe.Normal(),
-                ],
-            )
+            if trunc_top == 0:
+                plt.loglog(
+                    xs,
+                    ys,
+                    lstyle + mstyle,
+                    c=color,
+                    label=label + rate,
+                    path_effects=[
+                        pe.Stroke(linewidth=2.5, foreground="#252525"),
+                        pe.Normal(),
+                    ],
+                )
+            else:
+                plt.loglog(
+                    xs[:trunc_top],
+                    ys[:trunc_top],
+                    lstyle + mstyle,
+                    c=color,
+                    label=label + rate,
+                    path_effects=[
+                        pe.Stroke(linewidth=2.5, foreground="#252525"),
+                        pe.Normal(),
+                    ],
+                )
         else:
             continue
 
