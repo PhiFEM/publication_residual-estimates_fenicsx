@@ -79,7 +79,13 @@ for dir_path in dirs:
 
 sys.path.append(source_dir)
 
-from data import INITIAL_MESH_SIZE, MAXIMUM_DOF, generate_levelset
+from data import (
+    INITIAL_MESH_SIZE,
+    MAX_EXTRA_STEP,
+    MAXIMUM_DOF,
+    REFERENCE,
+    generate_levelset,
+)
 
 exact_solution_available = False
 try:
@@ -104,7 +110,6 @@ with open(os.path.join(source_dir, parameters_name + ".yaml"), "rb") as f:
     parameters = yaml.safe_load(f)
 
 initial_mesh_size = INITIAL_MESH_SIZE
-max_dof = MAXIMUM_DOF
 fe_degree = parameters["finite_element_degree"]
 levelset_degree = parameters["levelset_degree"]
 solution_degree = parameters["solution_degree"]
@@ -120,6 +125,7 @@ auxiliary_degree = parameters["auxiliary_degree"]
 discretize_levelset = parameters["discretize_levelset"]
 dirichlet_estimator = parameters["dirichlet_estimator"]
 single_layer = parameters["single_layer"]
+reference = parameters_name == REFERENCE
 
 # Create background mesh
 nx = int(np.abs(bbox[0][1] - bbox[0][0]) / initial_mesh_size / np.sqrt(2.0))
@@ -142,7 +148,15 @@ results = {
 
 num_dof = 0
 i = 0
-while num_dof < max_dof:
+extra_step = 0
+if reference:
+    ref_criterion = extra_step < MAX_EXTRA_STEP
+else:
+    ref_criterion = True
+
+dof_num_criterion = num_dof < MAXIMUM_DOF
+stopping_criterion = dof_num_criterion and ref_criterion
+while stopping_criterion:
     prefix = f"PHIFEM | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
     cell_name = mesh.topology.cell_name()
     levelset_element = element("Lagrange", cell_name, levelset_degree)
@@ -353,15 +367,17 @@ while num_dof < max_dof:
     print(df)
     df.write_csv(os.path.join(output_dir, "results.csv"))
 
-    if num_dof < max_dof:
-        # Marking and refinement
-        if refinement == "adap":
-            write_log(prefix + "Marking.")
-            facets_indices = marking(est_h, dorfler_param)[0]
-            write_log(prefix + "Refinement.")
-            mesh = dfx.mesh.refine(mesh, facets_indices)[0]
-        elif refinement == "unif":
-            write_log(prefix + "Refinement.")
-            mesh = dfx.mesh.refine(mesh)[0]
+    # Marking and refinement
+    if (refinement == "adap") and dof_num_criterion:
+        write_log(prefix + "Marking.")
+        facets_indices = marking(est_h, dorfler_param)[0]
+        write_log(prefix + "Refinement.")
+        mesh = dfx.mesh.refine(mesh, facets_indices)[0]
+    else:
+        write_log(prefix + "Refinement.")
+        mesh = dfx.mesh.refine(mesh)[0]
+        if reference:
+            print(f"(EXTRA STEP n° {extra_step})")
+            extra_step += 1
 
     i += 1

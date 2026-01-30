@@ -33,8 +33,6 @@ parser.add_argument("parameters", type=str, help="Choose the demo/parameters to 
 args = parser.parse_args()
 demo, parameters_name = args.parameters.split(sep="/")
 
-ref = parameters_name == "reference"
-
 source_dir = os.path.join(parent_dir, demo)
 output_dir = os.path.join(source_dir, "output_" + parameters_name)
 
@@ -64,7 +62,7 @@ for dir_path in dirs:
 
 sys.path.append(source_dir)
 
-from data import INITIAL_MESH_SIZE, MAXIMUM_DOF, gen_mesh
+from data import INITIAL_MESH_SIZE, MAX_EXTRA_STEP, MAXIMUM_DOF, REFERENCE, gen_mesh
 
 exact_solution_available = False
 try:
@@ -90,7 +88,7 @@ fe_degree = parameters["finite_element_degree"]
 dorfler_param = parameters["marking_parameter"]
 refinement = parameters["refinement"]
 curved = parameters["curved"]
-
+reference = parameters_name == REFERENCE
 
 mesh, geoModel = gen_mesh(initial_mesh_size, curved=curved)
 
@@ -99,7 +97,6 @@ fdim = tdim - 1
 cell_name = mesh.topology.cell_name()
 fe_element = element("CG", cell_name, fe_degree)
 dg0_element = element("DG", cell_name, 0)
-
 
 results = {
     "iteration": [],
@@ -111,13 +108,15 @@ results = {
 
 num_dof = 0
 i = 0
-j = 0
-stopping_criterion = num_dof < max_dof
+extra_step = 0
+if reference:
+    ref_criterion = extra_step < MAX_EXTRA_STEP
+else:
+    ref_criterion = True
+
+dof_num_criterion = num_dof < MAXIMUM_DOF
+stopping_criterion = dof_num_criterion and ref_criterion
 while stopping_criterion:
-    if ref:
-        stopping_criterion = (num_dof < max_dof) and j <= 0
-    else:
-        stopping_criterion = num_dof < max_dof
     prefix = f"FEM | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
     results["iteration"].append(i)
     fe_space = dfx.fem.functionspace(mesh, fe_element)
@@ -174,19 +173,19 @@ while stopping_criterion:
     df.write_csv(os.path.join(output_dir, "results.csv"))
 
     # Marking and refinement
-    if (ref and (num_dof > max_dof) and j < 1) or (refinement == "unif"):
-        write_log(prefix + "Refinement (uniform).")
-        mesh = geoModel.refineMarkedElements(tdim, all_cells)[0]
-        if curved:
-            mesh = geoModel.curveField(3)
-        if refinement != "unif":
-            j += 1
-    else:
+    if (refinement == "adap") and dof_num_criterion:
         write_log(prefix + "Marking.")
         facets_indices, cells_indices = marking(est_h, dorfler_param)
         write_log(prefix + "Refinement (adaptive).")
         mesh = geoModel.refineMarkedElements(tdim, cells_indices)[0]
         if curved:
             mesh = geoModel.curveField(3)
+    else:
+        write_log(prefix + "Refinement (uniform).")
+        mesh = geoModel.refineMarkedElements(tdim, all_cells)[0]
+        if curved:
+            mesh = geoModel.curveField(3)
+        if reference:
+            extra_step += 1
 
     i += 1

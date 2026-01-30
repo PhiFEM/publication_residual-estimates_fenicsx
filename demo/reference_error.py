@@ -16,6 +16,7 @@ from mpi4py import MPI
 sys.path.append("../")
 
 from utils import (
+    REFERENCE,
     cell_diameter,
     compute_boundary_error,
     compute_h10_error,
@@ -93,13 +94,13 @@ phifem = "phifem" in parameters_name
 if phifem:
     levelset_degree = parameters["levelset_degree"]
 
-with open(os.path.join(source_dir, "reference.yaml"), "rb") as f:
+with open(os.path.join(source_dir, REFERENCE + ".yaml"), "rb") as f:
     ref_parameters = yaml.safe_load(f)
 
 ref_degree = ref_parameters["finite_element_degree"]
 
 nums = []
-for f in os.listdir(os.path.join(source_dir, "output_reference", "checkpoints")):
+for f in os.listdir(os.path.join(source_dir, "output_" + REFERENCE, "checkpoints")):
     if f.endswith(".bp"):
         num = f[:-3].split(sep="_")[-1]
         nums.append(int(num))
@@ -108,7 +109,7 @@ ref_max_iteration = sorted(nums)[-1]
 reference_mesh = adios4dolfinx.read_mesh(
     os.path.join(
         source_dir,
-        "output_reference",
+        "output_" + REFERENCE,
         "checkpoints",
         f"checkpoint_{str(ref_max_iteration).zfill(2)}.bp",
     ),
@@ -141,7 +142,7 @@ if not exact_solution_available:
     adios4dolfinx.read_function(
         os.path.join(
             source_dir,
-            "output_reference",
+            "output_" + REFERENCE,
             "checkpoints",
             f"checkpoint_{str(ref_max_iteration).zfill(2)}.bp",
         ),
@@ -194,6 +195,7 @@ for i in range(iterations_num):
     if phifem:
         levelset_space = dfx.fem.functionspace(mesh, levelset_element)
         fe_levelset = dfx.fem.Function(levelset_space)
+
     dg0_space = dfx.fem.functionspace(mesh, dg0_element)
     solution_u = dfx.fem.Function(fe_space)
     solution_p = dfx.fem.Function(aux_space)
@@ -212,6 +214,7 @@ for i in range(iterations_num):
     nmm_fe2ref = dfx.fem.create_interpolation_data(
         reference_space, fe_space, reference_cells, padding=1.0e-14
     )
+
     if phifem:
         write_log(prefix + "Load solution_p.")
         adios4dolfinx.read_function(

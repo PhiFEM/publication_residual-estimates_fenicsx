@@ -7,6 +7,8 @@ tilt_angle = np.pi / 6.0
 shift = np.array([np.pi / 32.0, np.pi / 32.0])
 INITIAL_MESH_SIZE = 0.1
 MAXIMUM_DOF = 5.0e5
+REFERENCE = "phifem-bc-geo"
+MAX_EXTRA_STEP = 3
 
 
 def rotation(angle, x, y):
