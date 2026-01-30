@@ -155,7 +155,6 @@ def compute_boundary_local_estimators(
     dx = ufl.Measure("dx", domain=fine_mesh)
     v0 = ufl.TestFunction(dg0_fine_space)
 
-    h_T_coarse = cell_diameter(dg0_coarse_space)
     correction_function_fine = dfx.fem.Function(fine_space)
     correction_function_fine.x.array[:] = (
         solution_p_fine.x.array[:] * (phi_fine.x.array[:] - phih_fine.x.array[:])
@@ -179,23 +178,6 @@ def compute_boundary_local_estimators(
         cmap[parent_cells], weights=h10_norm_correction_vec.array[:]
     )[cmap]
 
-    # eta_{0,z}
-    l2_norm_correction = (
-        ufl.inner(correction_function_fine, correction_function_fine)
-        * v0
-        * dx(measure_ind)
-    )
-    l2_norm_correction_form = dfx.fem.form(l2_norm_correction)
-    l2_norm_correction_vec = assemble_vector(l2_norm_correction_form)
-
-    l2_norm_dg0_fine = dfx.fem.Function(dg0_fine_space)
-    l2_norm_dg0_fine.x.array[:] = l2_norm_correction_vec.array[:]
-    l2_norm_dg0 = dfx.fem.Function(dg0_coarse_space)
-    l2_norm_dg0.x.array[cmap] = np.bincount(
-        cmap[parent_cells], weights=l2_norm_correction_vec.array[:]
-    )[cmap]
-    l2_norm_dg0.x.array[:] = l2_norm_dg0.x.array[:] * h_T_coarse.x.array[:] ** (-2)
-
     fine_submesh, emap = dfx.mesh.create_submesh(
         fine_mesh, cdim, fine_cells_tags.find(2)
     )[:2]
@@ -210,7 +192,7 @@ def compute_boundary_local_estimators(
     )
 
     geo_dg0 = dfx.fem.Function(dg0_coarse_space)
-    geo_dg0.x.array[:] = h10_norm_dg0.x.array[:] + l2_norm_dg0.x.array[:]
+    geo_dg0.x.array[:] = h10_norm_dg0.x.array[:]
     return geo_dg0, fine_submesh_tags, fine_submesh
 
 
@@ -625,8 +607,10 @@ def compute_boundary_error(
     ref_boundary_error_l2_norm = dfx.fem.Function(ref_dg0_space)
     # We replace eventual NaN values with zero.
     ref_boundary_error_norm.x.array[:] = np.nan_to_num(
-        boundary_err_l2_vec.array[:], copy=False, nan=0.0
-    ) + np.nan_to_num(boundary_err_h1_vec.array[:], copy=False, nan=0.0)
+        boundary_err_h1_vec.array[:], copy=False, nan=0.0
+    )  # + np.nan_to_num(
+    #     boundary_err_l2_vec.array[:], copy=False, nan=0.0
+    # )
     ref_boundary_error_l2_norm.x.array[:] = boundary_err_l2_vec.array[:]
     ref_boundary_error_h1_norm.x.array[:] = boundary_err_h1_vec.array[:]
 
