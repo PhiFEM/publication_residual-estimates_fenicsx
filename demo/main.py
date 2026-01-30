@@ -322,6 +322,7 @@ while stopping_criterion:
                 solution_u,
                 solution_p,
                 dirichlet_data,
+                gh,
                 levelset,
                 phih,
                 cells_tags,

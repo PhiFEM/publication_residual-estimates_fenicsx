@@ -46,6 +46,25 @@ def _reshape_facets_map(f2c_connect):
     return f2c_map
 
 
+def nmm_interpolation(
+    space_to, f_from, cells_to=None, interpolation_data=None, padding=1.0e-14
+):
+    if cells_to is None:
+        mesh_to = space_to.mesh
+        cells_to = mesh_to.topology.index_map(mesh_to.topology.dim)
+        num_cells_to = cells_to.size_local + cells_to.num_ghosts
+        cells_to = np.arange(num_cells_to, dtype=np.int32)
+
+    if interpolation_data is None:
+        interpolation_data = dfx.fem.create_interpolation_data(
+            space_to, f_from.function_space, cells_to, padding=padding
+        )
+
+    f_to = dfx.fem.Function(space_to)
+    f_to.interpolate_nonmatching(f_from, cells_to, interpolation_data)
+    return f_to, interpolation_data
+
+
 def delta(u):
     return ufl.div(ufl.grad(u))
 
@@ -74,6 +93,7 @@ def compute_boundary_local_estimators(
     solution_u,
     solution_p,
     dirichlet_data,
+    g_h,
     levelset,
     phih,
     cells_tags,
@@ -121,6 +141,8 @@ def compute_boundary_local_estimators(
     solution_u_fine.interpolate_nonmatching(
         solution_u, fine_cells, nmm_solution_u_space2fine_space
     )
+    g_h_fine = dfx.fem.Function(fine_space)
+    g_h_fine.interpolate_nonmatching(g_h, fine_cells, nmm_solution_u_space2fine_space)
 
     g_fine = dfx.fem.Function(fine_space)
     g_fine.interpolate(dirichlet_data)
@@ -136,8 +158,8 @@ def compute_boundary_local_estimators(
     h_T_coarse = cell_diameter(dg0_coarse_space)
     correction_function_fine = dfx.fem.Function(fine_space)
     correction_function_fine.x.array[:] = (
-        solution_u_fine.x.array[:]
-        - phi_fine.x.array[:] * solution_p_fine.x.array[:]
+        solution_p_fine.x.array[:] * (phi_fine.x.array[:] - phih_fine.x.array[:])
+        + g_h_fine.x.array[:]
         - g_fine.x.array[:]
     )
     correction_function_fine = correction_function_fine
@@ -644,7 +666,7 @@ def compute_phi_p_error(
     coarse_cut_indicator_2_ref,
 ):
     ref_p = ref_solution - ref_g
-    phi_p_error = ref_p * ref_levelset - coarse_solution_p_2_ref * coarse_levelset_2_ref
+    phi_p_error = ref_p - coarse_solution_p_2_ref * coarse_levelset_2_ref
 
     ref_v0 = ufl.TestFunction(ref_dg0_space)
 

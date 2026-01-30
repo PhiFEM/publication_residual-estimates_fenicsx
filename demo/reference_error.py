@@ -7,7 +7,6 @@ import adios4dolfinx
 import dolfinx as dfx
 import numpy as np
 import polars as pl
-import ufl
 import yaml
 from basix.ufl import element
 from dolfinx.io import XDMFFile
@@ -21,8 +20,8 @@ from utils import (
     compute_boundary_error,
     compute_h10_error,
     compute_l2_error,
-    compute_phi_error,
-    compute_phi_p_error,
+    nmm_interpolation,
+    save_function,
     write_log,
 )
 
@@ -151,9 +150,6 @@ if not exact_solution_available:
     )
 else:
     write_log("Interpolate analytical solution.")
-    ref_solution = generate_exact_solution(ufl)
-    ref_x = ufl.SpatialCoordinate(reference_mesh)
-    ref_solution_h = ref_solution(ref_x)
     dirichlet_data = generate_exact_solution(np)
     ref_soluton_np = generate_exact_solution(np)
     ref_solution_h = dfx.fem.Function(reference_space)
@@ -174,8 +170,7 @@ results["l2_error"] = [np.nan] * iterations_num
 results["boundary_error"] = [np.nan] * iterations_num
 results["boundary_error_l2"] = [np.nan] * iterations_num
 results["boundary_error_h1"] = [np.nan] * iterations_num
-# results["phi_p_error"] = [np.nan] * iterations_num
-# results["phi_error"] = [np.nan] * iterations_num
+results["phi_p_error"] = [np.nan] * iterations_num
 results["triple_norm_error"] = [np.nan] * iterations_num
 
 for i in range(iterations_num):
@@ -247,39 +242,20 @@ for i in range(iterations_num):
         cut_indicator = dfx.fem.Function(dg0_space)
         cut_indicator.x.array[cells_tags.find(2)] = 1.0
 
-        nmm_levelset2ref_levelset = dfx.fem.create_interpolation_data(
-            reference_levelset_space, levelset_space, reference_cells, padding=1.0e-14
+        dg0_cut_indicator_2_ref, nmm_dg02ref_dg0 = nmm_interpolation(
+            ref_dg0_space, cut_indicator
         )
-        # Compute NMM interpolation data between coarse spaces and ref spaces
-        nmm_dg02ref_dg0 = dfx.fem.create_interpolation_data(
-            ref_dg0_space, dg0_space, reference_cells, padding=1.0e-14
+        coarse_levelset_2_ref, nmm_levelset2ref_levelset = nmm_interpolation(
+            reference_levelset_space, fe_levelset
         )
-        dg0_cut_indicator_2_ref = dfx.fem.Function(ref_dg0_space)
-        dg0_cut_indicator_2_ref.interpolate_nonmatching(
-            cut_indicator, reference_cells, nmm_dg02ref_dg0
-        )
-
-        solution_p_2_ref = dfx.fem.Function(reference_space)
-        solution_p_2_ref.interpolate_nonmatching(
-            solution_p, reference_cells, nmm_fe2ref
-        )
-
-        coarse_levelset_2_ref = dfx.fem.Function(reference_levelset_space)
-        coarse_levelset_2_ref.interpolate_nonmatching(
-            fe_levelset, reference_cells, nmm_levelset2ref_levelset
-        )
-
+        solution_p_2_ref, nmm_aux2ref = nmm_interpolation(reference_space, solution_p)
         coarse_mesh_h_T = cell_diameter(dg0_space)
-        dg0_coarse_h_T_2_ref = dfx.fem.Function(ref_dg0_space)
-        dg0_coarse_h_T_2_ref.interpolate_nonmatching(
-            coarse_mesh_h_T, reference_cells, nmm_dg02ref_dg0
-        )
+        dg0_coarse_h_T_2_ref = nmm_interpolation(
+            ref_dg0_space, coarse_mesh_h_T, interpolation_data=nmm_dg02ref_dg0
+        )[0]
 
-    # Interpolate coarse functions to ref spaces
-    solution_u_2_ref = dfx.fem.Function(reference_space)
-    solution_u_2_ref.interpolate_nonmatching(solution_u, reference_cells, nmm_fe2ref)
-    coarse_g_h_2_ref = dfx.fem.Function(reference_space)
-    coarse_g_h_2_ref.interpolate_nonmatching(coarse_g_h, reference_cells, nmm_fe2ref)
+    solution_u_2_ref, nmm_fe2ref = nmm_interpolation(reference_space, solution_u)
+    coarse_g_h_2_ref = nmm_interpolation(reference_space, coarse_g_h)[0]
 
     # Compute reference H10 error
     write_log(prefix + "Compute H10 error.")
