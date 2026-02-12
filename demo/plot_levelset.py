@@ -4,7 +4,6 @@ import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
-import plotly.graph_objects as go
 import yaml
 
 parent_dir = os.path.dirname(__file__)
@@ -23,7 +22,7 @@ demo, param_name = parameter.split(sep="/")
 source_dir = os.path.join(parent_dir, demo)
 sys.path.append(source_dir)
 
-from data import gen_mesh, generate_levelset
+from data import generate_levelset
 
 levelset = generate_levelset(np)
 
@@ -53,30 +52,3 @@ ax.set_xlim([bbox[0][0], bbox[0][1]])
 ax.set_ylim([bbox[1][0], bbox[1][1]])
 plt.gca().set_aspect("equal")
 plt.savefig(os.path.join(demo, "levelset"), dpi=500, bbox_inches="tight")
-
-fig = go.Figure(
-    data=[
-        go.Surface(
-            contours={
-                "z": {
-                    "show": True,
-                    "start": -0.001,
-                    "end": 0.0,
-                    "size": 0.001,
-                    "color": "white",
-                }
-            },
-            z=Z,
-            x=X,
-            y=Y,
-        )
-    ]
-)
-fig.update_layout(
-    autosize=False,
-    scene={"aspectratio": {"x": 1, "y": 1, "z": 1}},
-    width=600,
-    height=600,
-)
-
-fig.write_html(os.path.join(demo, "levelset.html"))

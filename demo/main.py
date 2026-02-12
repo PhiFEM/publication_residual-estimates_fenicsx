@@ -5,13 +5,11 @@ import sys
 
 import adios4dolfinx
 import dolfinx as dfx
-import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 import ufl
 import yaml
 from basix.ufl import element, mixed_element
-from meshtagsplot import plot_mesh_tags
 from mpi4py import MPI
 from phifem.mesh_scripts import compute_tags_measures
 from utils import (
@@ -327,25 +325,6 @@ while stopping_criterion:
                 dual=True,
             )
         )
-        if plot:
-            leg_dict = {1: "inside", 2: "cut", 3: "outside"}
-            levelset_kwargs = {"colors": "k", "linewidths": 2.0, "linestyles": "--"}
-            fig = plt.figure()
-            ax = fig.subplots()
-            plot_mesh_tags(
-                fine_mesh,
-                parent_cells_tags,
-                ax,
-                expression_levelset=plot_levelset,
-                leg_dict=leg_dict,
-                levelset_kwargs=levelset_kwargs,
-                display_scalarbar=False,
-            )
-            plt.savefig(
-                os.path.join(tags_dir, f"parent_cells_tags_{str(i).zfill(2)}.png"),
-                bbox_inches="tight",
-                dpi=500,
-            )
     else:
         results["eta_geo"].append(np.nan)
 

@@ -197,7 +197,7 @@ while stopping_criterion:
     # Marking and refinement
     if unif_refinement:
         write_log(prefix + "Refinement.")
-        mesh = dfx.mesh.refine(mesh)[0]
+        mesh = geoModel.refineMarkedElements(tdim, all_cells)[0]
         if not dof_num_criterion:
             print(f"(EXTRA STEP (UNIF) n° {extra_unif_step + 1})")
             extra_unif_step += 1
@@ -205,10 +205,14 @@ while stopping_criterion:
 
     if adap_refinement:
         write_log(prefix + "Marking.")
-        facets_indices = marking(est_h, dorfler_param)[0]
+        cells_indices = marking(est_h, dorfler_param)[1]
         write_log(prefix + "Refinement.")
-        mesh = dfx.mesh.refine(mesh, facets_indices)[0]
+        mesh = geoModel.refineMarkedElements(tdim, cells_indices)[0]
         if not dof_num_criterion:
             print(f"(EXTRA STEP (ADAP) n° {extra_adap_step + 1})")
             extra_adap_step += 1
+
+    if curved:
+        mesh = geoModel.curveField(3)
+
     i += 1
