@@ -14,8 +14,8 @@ To use our $\varphi$-FEM code please refer to the [phiFEM repository](https://gi
 
 This repository contains 4 test cases 
 
-1. **lshaped (Test case I):** Homogeneous zero Dirichlet boundary condition on a tilted L-shaped domain.
-2. **circle (Test case II):** Non-homogeneous Dirichlet boundary condition on a circular domain. The solution as the following analytical expression: $u(x,y) = (x^2 + y^2)^{1/3}$.
+1. **lshaped (Test case I):** Homogeneous zero Dirichlet boundary condition on a L-shaped domain.
+2. **circle (Test case II):** Non-homogeneous Dirichlet boundary condition on a circular domain. The solution as the following analytical expression: $u(x,y) = \big((x-1)^2 + y^2\big)^{1/3}$.
 3. **drop (Test case III):** Homogeneous zero Dirichlet boundary condition on a "drop"-shaped domain (with a polynomial cusp point).
 4. **drop_BC:** Non-homogeneous Dirichlet boundary condition on a "drop"-shaped domain (with a polynomial cusp point). The Dirichlet data is a Gaussian function centered at the cusp point.
 
@@ -51,37 +51,105 @@ The image is based on [FEniCSx](https://fenicsproject.org/) with additional pyth
    sudo -E bash run_image.sh
    ```
 
-### Generate the results from all schemes for a specific test case
+### Generate the results from all pre-defined schemes for a specific test case
 
-Inside the container:
+The test case parameters are defined in the `demo/TC/data.py` file.
+
+To generate the results for a specific test case, inside the container run:
    
    ```bash
    cd demo/
-   bash launch-test-case.sh DEMO
+   bash launch-test-case.sh TC
    ```
-with `DEMO=lshaped,circle,drop` or `drop_bc`.  
-The ²results are located in `demo/DEMO/output_*/`.
+with `TC=lshaped,circle,drop` or `drop_bc`.  
+The results are located in `demo/TC/output_*/`.
 
-### Generate the results for a specific scheme for a specific test case
+### Run an AFEM loop for a specific scheme and a specific test case
 
 Schemes parameters are specified in `.yaml` files in each demo directory, e.g. the file `demo/lshaped/phifem-bc-geo.yaml` contains the parameters for the phiFEM adaptive refinement scheme steered by $\eta$.  
 It is possible to run a specific scheme via:
 
 ```bash
 cd demo/
-python3 main.py DEMO/SCHEME
+python main.py TC/SCHEME
 ```
-where `DEMO=lshaped,circle,drop` or `drop_bc` and `SCHEME` is the name of a specific parameter.
+where `TC=lshaped,circle,drop` or `drop_bc` and `SCHEME` is the name of a `.yaml` file.  
 
-Other parameters can be modified in the `.yaml` files:
+> For example:
+> ```bash
+> cd demo/
+> python main.py circle/phifem-geo
+> ```
+> runs an adaptive refinement loop on the circle test case with the phiFEM scheme and $\eta_{\overline{BC}}$ estimator.
 
+### Custom test case and custom scheme
+
+It is possible to create a custom test case and a custom scheme by creating the proper file hierarchy.  
+
+#### Custom test case
+
+First create the directory for the custom test case:
 ```bash
-demo
-└── DEMO_NAME
-    └── parameters.yaml
+cd demo/
+mkdir my-custom-tc/
+```
+then, create a `data.py` file with the following mandatory parameters:
+```python
+INITIAL_MESH_SIZE = # your custom initial mesh size.
+MAXIMUM_DOF = # your custom maximum number of dof.
+REFERENCE = # this is the name of the scheme used to generate de reference solution.
+MAX_EXTRA_STEP_ADAP = # your custom number of additional adaptive refinement steps in order to compute a reference solution.
+MAX_EXTRA_STEP_ADAP = # your custom number of additional uniform refinement steps in order to compute a reference solution.
+
+def generate_levelset(mode):
+   def levelset(x):
+      # your custom levelset function (mode is standing either for numpy or ufl, each one might be used at some point in the scripts).
+      return value
+   return levelset
+
+def gen_mesh(hmax, curved=False):
+   import ngsPETSc.utils.fenicsx as ngfx
+   from mpi4py import MPI
+   from netgen.geom2d import SplineGeometry
+
+   # your custom geometry and mesh defined using NetGen API.
+   return mesh, geoModel
+
+def generate_dirichlet_data(mode):
+   def dirichlet_data(x):
+      # your custom Dirichlet BC data
+      return value
+   return dirichlet_data
 ```
 
-> **Remark:** `python3 main.py flower FEM` does not work due to the absence of refinement strategy for curved boundaries.
+#### Custom scheme
+
+To define a custom scheme, you must add a `.yaml` file to a test case directory.
+For example, in the custom test case directory we created above, create the file `demo/my-custom-tc/my-custom-scheme.yaml` containing:
+```yaml
+refinement: # your custom refinement scheme "adap" or "unif"
+mesh_type: # your custom phiFEM mesh type "bg" to keep the background mesh, "sub" to compute the submesh at each step.
+finite_element_degree: # your custom FE degree for the solution u
+auxiliary_degree: # your custom FE degree for the auxiliary phiFEM unknown p
+levelset_degree: # your custom FE degree for the levelset Lagrange interpolation
+boundary_detection_degree: # your custom quadrature degree for the phiFEM boundary detection and mesh tagging
+boundary_correction: # your custom boundary correction True if you want to use \eta_geo in the estimator, False otherwise.
+dirichlet_estimator: # your custom Dirichlet estimator True if you want to use \eta_BC in the estimator, False otherwise.
+penalization_coefficient: # your custom phiFEM penalization coefficient.
+stabilization_coefficient: # your custom phiFEM stabilization coefficient.
+marking_parameter: # your custom Dörfler's marking parameter.
+discretize_levelset: # your custom discretization of the levelset during the marking procedure of phiFEM True if you want phiFEM to mark the cells from the levelset interpolated in a FE space, False if you want phiFEM to mark the cells from the levelset discretized as a UFL function.
+single_layer: # your custom phiFEM cut cells layer True if you want to restrict phiFEM to a single layer of cut cells, False otherwise.
+bbox: # your custom bounding box to define the background mesh.
+name: # your custom scheme name.
+```
+
+Once your custom test case and custom scheme are defined you should be able to run:
+```bash
+cd demo/
+python main.py my-custom-tc/my-custom-scheme
+```
+and get the results in `demo/my-custom-tc/output_my-custom-scheme`.
 
 ## Issues and support
 

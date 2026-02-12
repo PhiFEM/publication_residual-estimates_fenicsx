@@ -37,10 +37,6 @@ source_dir = os.path.join(parent_dir, demo)
 output_dir = os.path.join(source_dir, "output_" + parameters_name)
 
 checkpoint_dir = os.path.join(output_dir, "checkpoints")
-
-if os.path.isdir(checkpoint_dir):
-    shutil.rmtree(checkpoint_dir)
-
 solutions_dir = os.path.join(output_dir, "solutions")
 etas_dir = os.path.join(output_dir, "etas")
 estimators_dir = os.path.join(output_dir, "estimators")
@@ -58,6 +54,10 @@ dirs = [
 for dir_path in dirs:
     if not os.path.isdir(dir_path):
         print(f"{dir_path} directory not found, we create it.")
+        os.mkdir(dir_path)
+    else:
+        print(f"{dir_path} directory found, we clear it.")
+        shutil.rmtree(dir_path)
         os.mkdir(dir_path)
 
 sys.path.append(source_dir)

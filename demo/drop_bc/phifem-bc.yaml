@@ -5,7 +5,6 @@ finite_element_degree: 1
 auxiliary_degree: 1
 levelset_degree: 1
 boundary_detection_degree: 1
-solution_degree: 1
 boundary_correction: false
 dirichlet_estimator: true
 penalization_coefficient: 1.0

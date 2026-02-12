@@ -43,10 +43,6 @@ if not os.path.isdir(output_dir):
     os.mkdir(output_dir)
 
 checkpoint_dir = os.path.join(output_dir, "checkpoints")
-
-if os.path.isdir(checkpoint_dir):
-    shutil.rmtree(checkpoint_dir)
-
 data_dir = os.path.join(output_dir, "data")
 tags_dir = os.path.join(output_dir, "tags")
 solutions_dir = os.path.join(output_dir, "solutions")
@@ -68,10 +64,12 @@ dirs = [
     meshes_dir,
 ]
 for dir_path in dirs:
-    if os.path.isdir(dir_path):
-        shutil.rmtree(dir_path)
+    if not os.path.isdir(dir_path):
+        print(f"{dir_path} directory not found, we create it.")
         os.mkdir(dir_path)
     else:
+        print(f"{dir_path} directory found, we clear it.")
+        shutil.rmtree(dir_path)
         os.mkdir(dir_path)
 
 
@@ -111,7 +109,6 @@ with open(os.path.join(source_dir, parameters_name + ".yaml"), "rb") as f:
 initial_mesh_size = INITIAL_MESH_SIZE
 fe_degree = parameters["finite_element_degree"]
 levelset_degree = parameters["levelset_degree"]
-solution_degree = parameters["solution_degree"]
 detection_degree = parameters["boundary_detection_degree"]
 pen_coef = parameters["penalization_coefficient"]
 stab_coef = parameters["stabilization_coefficient"]
