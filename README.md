@@ -42,13 +42,13 @@ The image is based on [FEniCSx](https://fenicsproject.org/) with additional pyth
    ```bash
    export CONTAINER_ENGINE=docker
    cd residual-phifem
-   sudo -E bash pull_image.sh
+   bash pull_image.sh
    ```
 
 3) Launch the container:
 
    ```bash
-   sudo -E bash run_image.sh
+   bash run_image.sh
    ```
 
 ### Generate the results from all pre-defined schemes for a specific test case
