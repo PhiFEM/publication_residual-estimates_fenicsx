@@ -92,6 +92,7 @@ First create the directory for the custom test case:
 ```bash
 cd demo/
 mkdir my-custom-tc/
+cd my-custom-tc/
 ```
 then, create a `data.py` file with the following mandatory parameters:
 ```python
