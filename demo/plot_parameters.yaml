@@ -36,13 +36,26 @@ l2_error:
   name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|u - u_h\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
   marker: "^"
   line: "-"
-phi_p_error:
-  name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|p\\varphi - p_h\\varphi_h\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
+boundary_error:
+  name: "$|u - \\varphi_h p_h - g_h|_{1,\\Omega \\cap \\Omega_h^{\\Gamma}}$"
   marker: "*"
+  line: "-"
+boundary_error_l2:
+  name: "$h^{-1}\\|u - \\varphi_h p_h - g_h\\|_{0,\\Omega}$"
+  marker: "x"
+  line: "-"
+boundary_error_h1:
+  name: "$|u - \\varphi_h p_h - g_h|_{1,\\Omega}$"
+  marker: "o"
   line: "-"
 phi_error:
   name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|p_h(\\varphi - \\varphi_h)\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
   marker: "o"
+  line: "-"
+  color: "#af8dc3"
+phi_p_error:
+  name: "$\\|p_h \\varphi_h - p\\varphi\\|_{1,h,\\Omega}$"
+  marker: "1"
   line: "-"
   color: "#af8dc3"
 eta_r:

@@ -1,12 +1,12 @@
-import ngsPETSc.utils.fenicsx as ngfx
 import numpy as np
-from mpi4py import MPI
-from netgen.geom2d import SplineGeometry
 
 tilt_angle = np.pi / 6.0
 shift = np.array([np.pi / 32.0, np.pi / 32.0])
 INITIAL_MESH_SIZE = 0.1
-MAXIMUM_DOF = 5.0e4
+MAXIMUM_DOF = 1.0e5
+REFERENCE = "phifem-bc-geo"
+MAX_EXTRA_STEP_ADAP = 2
+MAX_EXTRA_STEP_UNIF = 2
 
 
 def rotation(angle, x, y):
@@ -77,6 +77,10 @@ def rotate_shift(angle, shift, x):
 
 
 def gen_mesh(hmax, curved=False):
+    import ngsPETSc.utils.fenicsx as ngfx
+    from mpi4py import MPI
+    from netgen.geom2d import SplineGeometry
+
     geo = SplineGeometry()
     pnts = [
         (0.0, 0.0),
