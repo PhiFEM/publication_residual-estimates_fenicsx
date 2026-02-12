@@ -3,13 +3,11 @@ import os
 
 import dolfinx as dfx
 import numpy as np
-import pyvista as pv
 import ufl
 from basix.ufl import element
 from dolfinx.cpp.refinement import RefinementOption
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector
 from dolfinx.io import XDMFFile
-from matplotlib.colors import ListedColormap
 from petsc4py import PETSc
 
 parent_dir = os.path.dirname(__file__)
