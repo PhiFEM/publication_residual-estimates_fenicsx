@@ -7,7 +7,6 @@ import adios4dolfinx
 import dolfinx as dfx
 import numpy as np
 import polars as pl
-import ufl
 import yaml
 from basix.ufl import element
 from dolfinx.io import XDMFFile
@@ -17,10 +16,10 @@ sys.path.append("../")
 
 from utils import (
     cell_diameter,
+    compute_boundary_error,
     compute_h10_error,
     compute_l2_error,
-    compute_phi_error,
-    compute_phi_p_error,
+    nmm_interpolation,
     write_log,
 )
 
@@ -62,8 +61,12 @@ else:
 
 sys.path.append(source_dir)
 
-from data import generate_levelset
+from data import MAX_EXTRA_STEP_ADAP, MAX_EXTRA_STEP_UNIF, REFERENCE, generate_levelset
 
+if "phifem" not in parameters_name:
+    REFERENCE = parameters_name
+
+max_extra_step = MAX_EXTRA_STEP_ADAP + MAX_EXTRA_STEP_UNIF
 exact_solution_available = False
 try:
     from data import generate_exact_solution
@@ -92,13 +95,13 @@ phifem = "phifem" in parameters_name
 if phifem:
     levelset_degree = parameters["levelset_degree"]
 
-with open(os.path.join(source_dir, "reference.yaml"), "rb") as f:
+with open(os.path.join(source_dir, REFERENCE + ".yaml"), "rb") as f:
     ref_parameters = yaml.safe_load(f)
 
 ref_degree = ref_parameters["finite_element_degree"]
 
 nums = []
-for f in os.listdir(os.path.join(source_dir, "output_reference", "checkpoints")):
+for f in os.listdir(os.path.join(source_dir, "output_" + REFERENCE, "checkpoints")):
     if f.endswith(".bp"):
         num = f[:-3].split(sep="_")[-1]
         nums.append(int(num))
@@ -107,7 +110,7 @@ ref_max_iteration = sorted(nums)[-1]
 reference_mesh = adios4dolfinx.read_mesh(
     os.path.join(
         source_dir,
-        "output_reference",
+        "output_" + REFERENCE,
         "checkpoints",
         f"checkpoint_{str(ref_max_iteration).zfill(2)}.bp",
     ),
@@ -136,23 +139,23 @@ if not exact_solution_available:
     dirichlet_data = generate_dirichlet_data(np)
 
     # Load reference solution
-    reference_solution = dfx.fem.Function(reference_space)
+    ref_solution_h = dfx.fem.Function(reference_space)
     adios4dolfinx.read_function(
         os.path.join(
             source_dir,
-            "output_reference",
+            "output_" + REFERENCE,
             "checkpoints",
             f"checkpoint_{str(ref_max_iteration).zfill(2)}.bp",
         ),
-        reference_solution,
+        ref_solution_h,
         name="solution_u",
     )
 else:
     write_log("Interpolate analytical solution.")
-    ref_solution = generate_exact_solution(ufl)
-    ref_x = ufl.SpatialCoordinate(reference_mesh)
-    reference_solution = ref_solution(ref_x)
     dirichlet_data = generate_exact_solution(np)
+    ref_soluton_np = generate_exact_solution(np)
+    ref_solution_h = dfx.fem.Function(reference_space)
+    ref_solution_h.interpolate(ref_soluton_np)
 
 ref_g = dfx.fem.Function(reference_space)
 ref_g.interpolate(dirichlet_data)
@@ -166,9 +169,28 @@ if phifem:
 results = pl.read_csv(os.path.join(output_dir, "results.csv")).to_dict()
 results["h10_error"] = [np.nan] * iterations_num
 results["l2_error"] = [np.nan] * iterations_num
+results["boundary_error_phih_gh"] = [np.nan] * iterations_num
+results["boundary_error_phi_g"] = [np.nan] * iterations_num
 results["phi_p_error"] = [np.nan] * iterations_num
-results["phi_error"] = [np.nan] * iterations_num
 results["triple_norm_error"] = [np.nan] * iterations_num
+
+if parameters_name == REFERENCE:
+    iterations_num -= max_extra_step
+
+
+if "phifem" in REFERENCE:
+    reference_cells_tags = adios4dolfinx.read_meshtags(
+        os.path.join(
+            source_dir,
+            "output_" + REFERENCE,
+            "checkpoints",
+            f"checkpoint_{str(ref_max_iteration).zfill(2)}.bp",
+        ),
+        reference_mesh,
+        meshtag_name="cells_tags",
+    )
+else:
+    reference_cells_tags = None
 
 for i in range(iterations_num):
     prefix = f"REFERENCE ERROR | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
@@ -187,9 +209,12 @@ for i in range(iterations_num):
     if phifem:
         levelset_space = dfx.fem.functionspace(mesh, levelset_element)
         fe_levelset = dfx.fem.Function(levelset_space)
+
     dg0_space = dfx.fem.functionspace(mesh, dg0_element)
     solution_u = dfx.fem.Function(fe_space)
     solution_p = dfx.fem.Function(aux_space)
+    coarse_g_h = dfx.fem.Function(fe_space)
+    coarse_g_h.interpolate(dirichlet_data)
 
     write_log(prefix + "Load solution_u.")
     adios4dolfinx.read_function(
@@ -203,6 +228,7 @@ for i in range(iterations_num):
     nmm_fe2ref = dfx.fem.create_interpolation_data(
         reference_space, fe_space, reference_cells, padding=1.0e-14
     )
+
     if phifem:
         write_log(prefix + "Load solution_p.")
         adios4dolfinx.read_function(
@@ -235,42 +261,29 @@ for i in range(iterations_num):
         cut_indicator = dfx.fem.Function(dg0_space)
         cut_indicator.x.array[cells_tags.find(2)] = 1.0
 
-        nmm_levelset2ref_levelset = dfx.fem.create_interpolation_data(
-            reference_levelset_space, levelset_space, reference_cells, padding=1.0e-14
+        dg0_cut_indicator_2_ref, nmm_dg02ref_dg0 = nmm_interpolation(
+            ref_dg0_space, cut_indicator
         )
-        # Compute NMM interpolation data between coarse spaces and ref spaces
-        nmm_dg02ref_dg0 = dfx.fem.create_interpolation_data(
-            ref_dg0_space, dg0_space, reference_cells, padding=1.0e-14
+        coarse_levelset_2_ref, nmm_levelset2ref_levelset = nmm_interpolation(
+            reference_levelset_space, fe_levelset
         )
-        dg0_cut_indicator_2_ref = dfx.fem.Function(ref_dg0_space)
-        dg0_cut_indicator_2_ref.interpolate_nonmatching(
-            cut_indicator, reference_cells, nmm_dg02ref_dg0
-        )
-
-        solution_p_2_ref = dfx.fem.Function(reference_space)
-        solution_p_2_ref.interpolate_nonmatching(
-            solution_p, reference_cells, nmm_fe2ref
-        )
-
-        coarse_levelset_2_ref = dfx.fem.Function(reference_levelset_space)
-        coarse_levelset_2_ref.interpolate_nonmatching(
-            fe_levelset, reference_cells, nmm_levelset2ref_levelset
-        )
-
+        solution_p_2_ref, nmm_aux2ref = nmm_interpolation(reference_space, solution_p)
         coarse_mesh_h_T = cell_diameter(dg0_space)
-        dg0_coarse_h_T_2_ref = dfx.fem.Function(ref_dg0_space)
-        dg0_coarse_h_T_2_ref.interpolate_nonmatching(
-            coarse_mesh_h_T, reference_cells, nmm_dg02ref_dg0
-        )
+        dg0_coarse_h_T_2_ref = nmm_interpolation(
+            ref_dg0_space, coarse_mesh_h_T, interpolation_data=nmm_dg02ref_dg0
+        )[0]
 
-    # Interpolate coarse functions to ref spaces
-    solution_u_2_ref = dfx.fem.Function(reference_space)
-    solution_u_2_ref.interpolate_nonmatching(solution_u, reference_cells, nmm_fe2ref)
+    solution_u_2_ref, nmm_fe2ref = nmm_interpolation(reference_space, solution_u)
+    coarse_g_h_2_ref = nmm_interpolation(reference_space, coarse_g_h)[0]
 
     # Compute reference H10 error
     write_log(prefix + "Compute H10 error.")
     ref_h10_norm, coarse_h10_norm = compute_h10_error(
-        solution_u_2_ref, reference_solution, ref_dg0_space, dg0_space
+        solution_u_2_ref,
+        ref_solution_h,
+        ref_dg0_space,
+        dg0_space,
+        ref_cells_tags=reference_cells_tags,
     )
 
     with XDMFFile(
@@ -285,85 +298,69 @@ for i in range(iterations_num):
     results["h10_error"][i] = np.sqrt(h10_err_sqd)
 
     if phifem:
-        write_log(prefix + "Compute L2 error.")
-        ref_l2_norm, coarse_l2_norm = compute_l2_error(
-            solution_u_2_ref,
-            reference_solution,
+        # Compute boundary error u - phih ph - gh
+        (
+            ref_boundary_error_phih_gh_norm,
+            coarse_boundary_error_phih_gh_norm,
+        ) = compute_boundary_error(
+            ref_solution_h,
+            coarse_levelset_2_ref,
+            solution_p_2_ref,
+            coarse_g_h_2_ref,
             ref_dg0_space,
-            dg0_space,
-            dg0_coarse_h_T_2_ref,
             dg0_cut_indicator_2_ref,
+            dg0_space,
+            ref_cells_tags=reference_cells_tags,
         )
 
         with XDMFFile(
-            mesh.comm,
-            os.path.join(errors_dir, f"l2_error_{str(i).zfill(2)}.xdmf"),
+            reference_mesh.comm,
+            os.path.join(errors_dir, f"boundary_error_phih_gh_{str(i).zfill(2)}.xdmf"),
             "w",
         ) as of:
             of.write_mesh(mesh)
-            of.write_function(coarse_l2_norm)
+            of.write_function(coarse_boundary_error_phih_gh_norm)
 
-        l2_err_sqd = ref_l2_norm.x.array.sum()
-        results["l2_error"][i] = np.sqrt(l2_err_sqd)
+        assert not np.any(np.isnan(ref_boundary_error_phih_gh_norm.x.array)), (
+            "ref_boundary_error_phih_gh_norm.x.array contains NaNs."
+        )
+        boundary_err_phih_gh_sqd = ref_boundary_error_phih_gh_norm.x.array.sum()
 
-        write_log(prefix + "Compute L2 phi p error.")
-        ref_phi_p_norm, coarse_phi_p_norm = compute_phi_p_error(
+        results["boundary_error_phih_gh"][i] = np.sqrt(boundary_err_phih_gh_sqd)
+
+        # Compute boundary error u - phi ph - g
+        (
+            ref_boundary_error_phi_g_norm,
+            coarse_boundary_error_phi_g_norm,
+        ) = compute_boundary_error(
+            ref_solution_h,
+            reference_levelset,
             solution_p_2_ref,
-            reference_solution,
             ref_g,
             ref_dg0_space,
-            dg0_space,
-            coarse_levelset_2_ref,
-            reference_levelset,
-            dg0_coarse_h_T_2_ref,
             dg0_cut_indicator_2_ref,
+            dg0_space,
+            ref_cells_tags=reference_cells_tags,
         )
 
         with XDMFFile(
             reference_mesh.comm,
-            os.path.join(errors_dir, f"phi_p_error_{str(i).zfill(2)}.xdmf"),
+            os.path.join(errors_dir, f"boundary_error_phi_g_{str(i).zfill(2)}.xdmf"),
             "w",
         ) as of:
             of.write_mesh(mesh)
-            of.write_function(coarse_phi_p_norm)
+            of.write_function(coarse_boundary_error_phi_g_norm)
 
-        assert not np.any(np.isnan(ref_phi_p_norm.x.array)), (
-            "ref_phi_p_norm.x.array contains NaNs."
+        assert not np.any(np.isnan(ref_boundary_error_phi_g_norm.x.array)), (
+            "ref_boundary_error_phi_g_norm.x.array contains NaNs."
         )
-        phi_p_err_sqd = ref_phi_p_norm.x.array.sum()
+        boundary_err_phi_g_sqd = ref_boundary_error_phi_g_norm.x.array.sum()
 
-        results["phi_p_error"][i] = np.sqrt(phi_p_err_sqd)
-
-        write_log(prefix + "Compute phi error.")
-        ref_phi_norm, coarse_phi_norm = compute_phi_error(
-            solution_p_2_ref,
-            reference_levelset,
-            coarse_levelset_2_ref,
-            dg0_coarse_h_T_2_ref,
-            dg0_cut_indicator_2_ref,
-            ref_dg0_space,
-            dg0_space,
-        )
-
-        with XDMFFile(
-            reference_mesh.comm,
-            os.path.join(errors_dir, f"ref_phi_error_{str(i).zfill(2)}.xdmf"),
-            "w",
-        ) as of:
-            of.write_mesh(reference_mesh)
-            of.write_function(coarse_phi_norm)
-
-        phi_err_sqd = ref_phi_norm.x.array.sum()
-        results["phi_error"][i] = np.sqrt(phi_err_sqd)
-
-        assert not np.any(np.isnan(ref_phi_norm.x.array)), (
-            "ref_phi_norm.x.array contains NaNs."
-        )
+        results["boundary_error_phi_g"][i] = np.sqrt(boundary_err_phi_g_sqd)
 
         triple_norm_err_sqd = h10_err_sqd
-        triple_norm_err_sqd += l2_err_sqd
-        triple_norm_err_sqd += phi_p_err_sqd
-        triple_norm_err_sqd += phi_err_sqd
+        triple_norm_err_sqd += boundary_err_phih_gh_sqd
+        triple_norm_err_sqd += boundary_err_phi_g_sqd
 
         results["triple_norm_error"][i] = np.sqrt(triple_norm_err_sqd)
     else:

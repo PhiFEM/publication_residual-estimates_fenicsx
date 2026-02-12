@@ -46,6 +46,25 @@ def _reshape_facets_map(f2c_connect):
     return f2c_map
 
 
+def nmm_interpolation(
+    space_to, f_from, cells_to=None, interpolation_data=None, padding=1.0e-14
+):
+    if cells_to is None:
+        mesh_to = space_to.mesh
+        cells_to = mesh_to.topology.index_map(mesh_to.topology.dim)
+        num_cells_to = cells_to.size_local + cells_to.num_ghosts
+        cells_to = np.arange(num_cells_to, dtype=np.int32)
+
+    if interpolation_data is None:
+        interpolation_data = dfx.fem.create_interpolation_data(
+            space_to, f_from.function_space, cells_to, padding=padding
+        )
+
+    f_to = dfx.fem.Function(space_to)
+    f_to.interpolate_nonmatching(f_from, cells_to, interpolation_data)
+    return f_to, interpolation_data
+
+
 def delta(u):
     return ufl.div(ufl.grad(u))
 
@@ -71,7 +90,10 @@ def compute_parent_cells(coarse_mesh, fine_mesh, initial_parent_cells):
 
 def compute_boundary_local_estimators(
     coarse_mesh,
+    solution_u,
     solution_p,
+    dirichlet_data,
+    g_h,
     levelset,
     phih,
     cells_tags,
@@ -112,6 +134,19 @@ def compute_boundary_local_estimators(
         solution_p, fine_cells, nmm_solution_w_space2fine_space
     )
 
+    nmm_solution_u_space2fine_space = dfx.fem.create_interpolation_data(
+        fine_space, solution_u.function_space, fine_cells, padding=padding
+    )
+    solution_u_fine = dfx.fem.Function(fine_space)
+    solution_u_fine.interpolate_nonmatching(
+        solution_u, fine_cells, nmm_solution_u_space2fine_space
+    )
+    g_h_fine = dfx.fem.Function(fine_space)
+    g_h_fine.interpolate_nonmatching(g_h, fine_cells, nmm_solution_u_space2fine_space)
+
+    g_fine = dfx.fem.Function(fine_space)
+    g_fine.interpolate(dirichlet_data)
+
     cell_name = fine_mesh.topology.cell_name()
     dg0_element = element("DG", cell_name, 0)
     dg0_coarse_space = dfx.fem.functionspace(coarse_mesh, dg0_element)
@@ -120,11 +155,12 @@ def compute_boundary_local_estimators(
     dx = ufl.Measure("dx", domain=fine_mesh)
     v0 = ufl.TestFunction(dg0_fine_space)
 
-    h_T_coarse = cell_diameter(dg0_coarse_space)
     correction_function_fine = dfx.fem.Function(fine_space)
     correction_function_fine.x.array[:] = (
-        phih_fine.x.array[:] - phi_fine.x.array[:]
-    ) * solution_p_fine.x.array[:]
+        solution_p_fine.x.array[:] * (phi_fine.x.array[:] - phih_fine.x.array[:])
+        + g_h_fine.x.array[:]
+        - g_fine.x.array[:]
+    )
     correction_function_fine = correction_function_fine
     grad_correction = ufl.grad(correction_function_fine)
     if dual:
@@ -142,23 +178,6 @@ def compute_boundary_local_estimators(
         cmap[parent_cells], weights=h10_norm_correction_vec.array[:]
     )[cmap]
 
-    # eta_{0,z}
-    l2_norm_correction = (
-        ufl.inner(correction_function_fine, correction_function_fine)
-        * v0
-        * dx(measure_ind)
-    )
-    l2_norm_correction_form = dfx.fem.form(l2_norm_correction)
-    l2_norm_correction_vec = assemble_vector(l2_norm_correction_form)
-
-    l2_norm_dg0_fine = dfx.fem.Function(dg0_fine_space)
-    l2_norm_dg0_fine.x.array[:] = l2_norm_correction_vec.array[:]
-    l2_norm_dg0 = dfx.fem.Function(dg0_coarse_space)
-    l2_norm_dg0.x.array[cmap] = np.bincount(
-        cmap[parent_cells], weights=l2_norm_correction_vec.array[:]
-    )[cmap]
-    l2_norm_dg0.x.array[:] = l2_norm_dg0.x.array[:] * h_T_coarse.x.array[:] ** (-2)
-
     fine_submesh, emap = dfx.mesh.create_submesh(
         fine_mesh, cdim, fine_cells_tags.find(2)
     )[:2]
@@ -173,7 +192,7 @@ def compute_boundary_local_estimators(
     )
 
     geo_dg0 = dfx.fem.Function(dg0_coarse_space)
-    geo_dg0.x.array[:] = h10_norm_dg0.x.array[:] + l2_norm_dg0.x.array[:]
+    geo_dg0.x.array[:] = h10_norm_dg0.x.array[:]
     return geo_dg0, fine_submesh_tags, fine_submesh
 
 
@@ -471,14 +490,27 @@ def marking(est_h, dorfler_param):
     return facets_indices, cells_indices
 
 
-def compute_h10_error(solution_u_2_ref, reference_solution, ref_dg0_space, dg0_space):
+def compute_h10_error(
+    solution_u_2_ref,
+    reference_solution,
+    ref_dg0_space,
+    dg0_space,
+    ref_cells_tags=None,
+):
+    if ref_cells_tags is None:
+        d_error = ufl.dx(metadata={"quadrature_degree": 20})
+    else:
+        reference_mesh = solution_u_2_ref.function_space.mesh
+        dx = ufl.Measure(
+            "dx",
+            domain=reference_mesh,
+            subdomain_data=ref_cells_tags,
+            metadata={"quadrature_degree": 20},
+        )
+        d_error = dx(1)
     grad_diff = ufl.grad(reference_solution - solution_u_2_ref)
     ref_v0 = ufl.TestFunction(ref_dg0_space)
-    h10_norm_diff = (
-        ufl.inner(grad_diff, grad_diff)
-        * ref_v0
-        * ufl.dx(metadata={"quadrature_degree": 20})
-    )
+    h10_norm_diff = ufl.inner(grad_diff, grad_diff) * ref_v0 * d_error
     h10_norm_form = dfx.fem.form(h10_norm_diff)
     h10_norm_vec = assemble_vector(h10_norm_form)
     ref_h10_norm = dfx.fem.Function(ref_dg0_space)
@@ -547,6 +579,75 @@ def compute_l2_error(
     return ref_l2_norm, coarse_l2_norm
 
 
+def compute_boundary_error(
+    ref_solution,
+    coarse_levelset_2_ref,
+    coarse_solution_p_2_ref,
+    coarse_g_h_2_ref,
+    ref_dg0_space,
+    coarse_cut_indicator_2_ref,
+    dg0_space,
+    ref_cells_tags=None,
+):
+    if ref_cells_tags is None:
+        d_error = ufl.dx(metadata={"quadrature_degree": 20})
+    else:
+        reference_mesh = coarse_g_h_2_ref.function_space.mesh
+        dx = ufl.Measure(
+            "dx",
+            domain=reference_mesh,
+            subdomain_data=ref_cells_tags,
+            metadata={"quadrature_degree": 20},
+        )
+        d_error = dx(1)
+
+    boundary_error_fct = (
+        ref_solution
+        - coarse_levelset_2_ref * coarse_solution_p_2_ref
+        - coarse_g_h_2_ref
+    )
+
+    ref_v0 = ufl.TestFunction(ref_dg0_space)
+
+    boundary_error_h1_norm_int = (
+        coarse_cut_indicator_2_ref
+        * ufl.inner(ufl.grad(boundary_error_fct), ufl.grad(boundary_error_fct))
+        * ref_v0
+        * d_error
+    )
+    boundary_error_h1_norm_form = dfx.fem.form(boundary_error_h1_norm_int)
+    boundary_err_h1_vec = dfx.fem.assemble_vector(boundary_error_h1_norm_form)
+
+    ref_boundary_error_norm = dfx.fem.Function(ref_dg0_space)
+    ref_boundary_error_h1_norm = dfx.fem.Function(ref_dg0_space)
+    # We replace eventual NaN values with zero.
+    ref_boundary_error_norm.x.array[:] = np.nan_to_num(
+        boundary_err_h1_vec.array[:], copy=False, nan=0.0
+    )
+    ref_boundary_error_h1_norm.x.array[:] = boundary_err_h1_vec.array[:]
+
+    coarse_boundary_error_norm = None
+    try:
+        coarse_mesh = dg0_space.mesh
+        cdim = coarse_mesh.geometry.dim
+        num_cells = coarse_mesh.topology.index_map(cdim).size_global
+        all_cells = np.arange(num_cells)
+        nmm_ref_space2coarse_space = dfx.fem.create_interpolation_data(
+            dg0_space, ref_dg0_space, all_cells, padding=1.0e-20
+        )
+        coarse_boundary_error_norm = dfx.fem.Function(dg0_space)
+        coarse_boundary_error_norm.interpolate_nonmatching(
+            ref_boundary_error_norm, all_cells, nmm_ref_space2coarse_space
+        )
+    except RuntimeError:
+        print("Failed to interpolate l2_norm to coarse space.")
+        pass
+    return (
+        ref_boundary_error_norm,
+        coarse_boundary_error_norm,
+    )
+
+
 def compute_phi_p_error(
     coarse_solution_p_2_ref,
     ref_solution,
@@ -559,7 +660,7 @@ def compute_phi_p_error(
     coarse_cut_indicator_2_ref,
 ):
     ref_p = ref_solution - ref_g
-    phi_p_error = ref_p * ref_levelset - coarse_solution_p_2_ref * coarse_levelset_2_ref
+    phi_p_error = ref_p - coarse_solution_p_2_ref * coarse_levelset_2_ref
 
     ref_v0 = ufl.TestFunction(ref_dg0_space)
 

@@ -1,6 +1,7 @@
 import argparse
 import os
 
+import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
@@ -22,40 +23,51 @@ args = parser.parse_args()
 parameters_list = args.parameters.split(sep=",")
 data_list = args.data.split(sep=",")
 
+with open(os.path.join(parent_dir, "plot_parameters.yaml"), "rb") as f:
+    plot_param = yaml.safe_load(f)
+
 fig = plt.figure()
 ax = fig.subplots()
 parameter_names = []
 for parameter in parameters_list:
     demo, param_name = parameter.split(sep="/")
+    if "phifem" in param_name:
+        style = "-"
+        color = "#d7191c"
+    else:
+        style = "--"
+        color = "#2c7bb6"
+    scheme_name = plot_param[param_name]["name"].split(sep=",")[0]
     parameter_names.append(param_name)
     with open(os.path.join(parameter + ".yaml"), "rb") as f:
         parameters = yaml.safe_load(f)
 
-    ref_type = parameters["refinement"]
-    mesh_type = parameters["mesh_type"]
-    if ref_type == "unif":
-        trunc = -3
-    elif ref_type == "adap":
-        trunc = -10
     data_path = os.path.join(
         demo,
-        "output_phifem_" + param_name,
+        "output_" + param_name,
         "results.csv",
     )
     df = pl.read_csv(data_path)
-    for d in data_list:
-        if d != "Reference_error":
-            xs = df["dof"].to_numpy()
-            ys = df[d].to_numpy() / df["Reference_error"].to_numpy()
-            mask = np.isnan(ys)
-            xs = xs[~mask]
-            ys = ys[~mask]
-            plt.plot(
-                xs,
-                ys,
-                "-^",
-                label=f"{param_name}, {d}",
-            )
+    if "phifem" in param_name:
+        est = "\\eta"
+    else:
+        est = "\\eta_1"
+    xs = df["dof"].to_numpy()
+    ys = df["estimator"].to_numpy() / df["h10_error"].to_numpy()
+    mask = np.isnan(ys)
+    xs = xs[~mask]
+    ys = ys[~mask]
+    plt.semilogx(
+        xs,
+        ys,
+        style + "^",
+        color=color,
+        label=f"${est}/|e|_{{1,\\Omega}}$, " + f"{scheme_name}",
+        path_effects=[
+            pe.Stroke(linewidth=2.5, foreground="#252525"),
+            pe.Normal(),
+        ],
+    )
 
 plt.xlabel("dof")
 plt.legend()

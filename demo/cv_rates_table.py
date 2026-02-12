@@ -18,9 +18,10 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "trunc",
+    "--trunc",
+    "-t",
     type=int,
-    default=1,
+    default=0,
     help="Truncation of the top of the data to be plotted.",
 )
 
@@ -57,9 +58,9 @@ with open(tex_template_path, "r") as f:
         mesh_type = parameters["mesh_type"]
         scheme_name = plot_param[param_name]["name"]
         if ref_type == "unif":
-            trunc_btm = trunc_top - 3
+            trunc_btm = trunc_top - 10
         elif ref_type == "adap":
-            trunc_btm = trunc_top - 15
+            trunc_btm = trunc_top - 10
         data_path = os.path.join(
             demo,
             "output_" + param_name,
@@ -68,9 +69,10 @@ with open(tex_template_path, "r") as f:
 
         df = pl.read_csv(data_path)
         for d in data_list:
-            d_name = plot_param[d]["name"]
             if d == "estimator":
                 d_name = scheme_name.split(sep=" ")[1][1:-1]
+            else:
+                d_name = plot_param[d]["name"]
             xs = df["dof"].to_numpy()
             try:
                 ys = df[d].to_numpy()
@@ -85,11 +87,18 @@ with open(tex_template_path, "r") as f:
             except ValueError:
                 ys_not_zero = False
             if ys_not_zero:
-                slope, b = np.polyfit(
-                    np.log(xs[trunc_btm:trunc_top]),
-                    np.log(ys[trunc_btm:trunc_top]),
-                    1,
-                )
+                if trunc_top == 0:
+                    slope, b = np.polyfit(
+                        np.log(xs[trunc_btm:]),
+                        np.log(ys[trunc_btm:]),
+                        1,
+                    )
+                else:
+                    slope, b = np.polyfit(
+                        np.log(xs[trunc_btm:trunc_top]),
+                        np.log(ys[trunc_btm:trunc_top]),
+                        1,
+                    )
                 content = content.replace(
                     "[" + param_name + "-" + d + "]",
                     str(np.round(slope, 2)).ljust(5, "0")
