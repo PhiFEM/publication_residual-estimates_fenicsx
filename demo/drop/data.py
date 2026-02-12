@@ -1,12 +1,11 @@
-import ngsPETSc.utils.fenicsx as ngfx
 import numpy as np
-import ufl
-from mpi4py import MPI
-from netgen.geom2d import SplineGeometry
 
 _angle = -np.pi / 16.0
 INITIAL_MESH_SIZE = 0.1
-MAXIMUM_DOF = 5.0e5
+MAXIMUM_DOF = 1.0e5
+REFERENCE = "phifem-bc-geo"
+MAX_EXTRA_STEP_ADAP = 2
+MAX_EXTRA_STEP_UNIF = 2
 
 
 def _rotate(x, angle):
@@ -22,15 +21,15 @@ def _rotate(x, angle):
 def generate_levelset(mode):
     def minimum(f1, f2):
         if mode.__name__ == "numpy":
-            return np.minimum(f1, f2)
+            return mode.minimum(f1, f2)
         elif mode.__name__ == "ufl":
-            return ufl.conditional(f1 < f2, f1, f2)
+            return mode.conditional(f1 < f2, f1, f2)
 
     def maximum(f1, f2):
         if mode.__name__ == "numpy":
-            return np.maximum(f1, f2)
+            return mode.maximum(f1, f2)
         elif mode.__name__ == "ufl":
-            return ufl.conditional(f1 > f2, f1, f2)
+            return mode.conditional(f1 > f2, f1, f2)
 
     def phi_circle(x):
         val = mode.sqrt(x[0] ** 2 + x[1] ** 2) - 1.0
@@ -57,19 +56,23 @@ def generate_levelset(mode):
 
 def generate_source_term(mode):
     def source_term(x):
-        return np.ones_like(x[0])
+        return mode.ones_like(x[0])
 
     return source_term
 
 
 def generate_dirichlet_data(mode):
     def dirichlet_data(x):
-        return np.zeros_like(x[0])
+        return mode.zeros_like(x[0])
 
     return dirichlet_data
 
 
 def gen_mesh(hmax, curved=False):
+    import ngsPETSc.utils.fenicsx as ngfx
+    from mpi4py import MPI
+    from netgen.geom2d import SplineGeometry
+
     geo = SplineGeometry()
     pnts = [
         (-3.0, -1.0),

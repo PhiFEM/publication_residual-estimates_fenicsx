@@ -81,7 +81,8 @@ sys.path.append(source_dir)
 
 from data import (
     INITIAL_MESH_SIZE,
-    MAX_EXTRA_STEP,
+    MAX_EXTRA_STEP_ADAP,
+    MAX_EXTRA_STEP_UNIF,
     MAXIMUM_DOF,
     REFERENCE,
     generate_levelset,
@@ -148,14 +149,10 @@ results = {
 
 num_dof = 0
 i = 0
-extra_step = 0
-if reference:
-    ref_criterion = extra_step < MAX_EXTRA_STEP
-else:
-    ref_criterion = True
+extra_adap_step = 0
+extra_unif_step = 0
+stopping_criterion = True
 
-dof_num_criterion = num_dof < MAXIMUM_DOF
-stopping_criterion = dof_num_criterion and ref_criterion
 while stopping_criterion:
     prefix = f"PHIFEM | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
     cell_name = mesh.topology.cell_name()
@@ -272,7 +269,8 @@ while stopping_criterion:
         exact_solution = generate_exact_solution(ufl)(x)
         dirichlet_data = generate_exact_solution(np)
         fh = -ufl.div(ufl.grad(exact_solution))
-        gh = exact_solution
+        gh = dfx.fem.Function(u_space)
+        gh.interpolate(dirichlet_data)
 
     write_log(prefix + "phiFEM solve.")
     solution_u, solution_p = phifem_dual_solve(
@@ -368,17 +366,42 @@ while stopping_criterion:
     print(df)
     df.write_csv(os.path.join(output_dir, "results.csv"))
 
+    if reference:
+        ref_criterion = (
+            extra_adap_step + extra_unif_step
+            < MAX_EXTRA_STEP_ADAP + MAX_EXTRA_STEP_UNIF
+        )
+    else:
+        ref_criterion = False
+    dof_num_criterion = num_dof < MAXIMUM_DOF
+    stopping_criterion = dof_num_criterion or ref_criterion
+
+    if not stopping_criterion:
+        break
+
+    unif_refinement = (refinement == "unif" and not dof_num_criterion) or (
+        extra_unif_step < MAX_EXTRA_STEP_UNIF and extra_adap_step >= MAX_EXTRA_STEP_ADAP
+    )
+    adap_refinement = (refinement == "adap" and not dof_num_criterion) or (
+        extra_adap_step < MAX_EXTRA_STEP_ADAP
+    )
+
     # Marking and refinement
-    if (refinement == "adap") and dof_num_criterion:
+    if unif_refinement:
+        write_log(prefix + "Refinement.")
+        mesh = dfx.mesh.refine(mesh)[0]
+        if not dof_num_criterion:
+            print(f"(EXTRA STEP (UNIF) n° {extra_unif_step + 1})")
+            extra_unif_step += 1
+        adap_refinement = False
+
+    if adap_refinement:
         write_log(prefix + "Marking.")
         facets_indices = marking(est_h, dorfler_param)[0]
         write_log(prefix + "Refinement.")
         mesh = dfx.mesh.refine(mesh, facets_indices)[0]
-    else:
-        write_log(prefix + "Refinement.")
-        mesh = dfx.mesh.refine(mesh)[0]
-        if reference:
-            print(f"(EXTRA STEP n° {extra_step})")
-            extra_step += 1
+        if not dof_num_criterion:
+            print(f"(EXTRA STEP (ADAP) n° {extra_adap_step + 1})")
+            extra_adap_step += 1
 
     i += 1

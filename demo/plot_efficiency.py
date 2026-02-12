@@ -49,32 +49,25 @@ for parameter in parameters_list:
     )
     df = pl.read_csv(data_path)
     if "phifem" in param_name:
-        error2comp = ["h10_error", "triple_norm_error"]
         est = "\\eta"
-        err_names = ["|e|_{1,\\Omega}", "E"]
-        markers = ["^", "o"]
     else:
-        error2comp = ["h10_error"]
-        err_names = ["|e|_{1,\\Omega}"]
         est = "\\eta_1"
-        markers = ["^"]
-    for err, err_name, marker in zip(error2comp, err_names, markers):
-        xs = df["dof"].to_numpy()
-        ys = df["estimator"].to_numpy() / df[err].to_numpy()
-        mask = np.isnan(ys)
-        xs = xs[~mask]
-        ys = ys[~mask]
-        plt.semilogx(
-            xs,
-            ys,
-            style + marker,
-            color=color,
-            label=f"${est}/{err_name}$, " + f"{scheme_name}",
-            path_effects=[
-                pe.Stroke(linewidth=2.5, foreground="#252525"),
-                pe.Normal(),
-            ],
-        )
+    xs = df["dof"].to_numpy()
+    ys = df["estimator"].to_numpy() / df["h10_error"].to_numpy()
+    mask = np.isnan(ys)
+    xs = xs[~mask]
+    ys = ys[~mask]
+    plt.semilogx(
+        xs,
+        ys,
+        style + "^",
+        color=color,
+        label=f"${est}/|e|_{{1,\\Omega}}$, " + f"{scheme_name}",
+        path_effects=[
+            pe.Stroke(linewidth=2.5, foreground="#252525"),
+            pe.Normal(),
+        ],
+    )
 
 plt.xlabel("dof")
 plt.legend()

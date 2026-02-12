@@ -62,7 +62,14 @@ for dir_path in dirs:
 
 sys.path.append(source_dir)
 
-from data import INITIAL_MESH_SIZE, MAX_EXTRA_STEP, MAXIMUM_DOF, REFERENCE, gen_mesh
+from data import (
+    INITIAL_MESH_SIZE,
+    MAX_EXTRA_STEP_ADAP,
+    MAX_EXTRA_STEP_UNIF,
+    MAXIMUM_DOF,
+    REFERENCE,
+    gen_mesh,
+)
 
 exact_solution_available = False
 try:
@@ -70,6 +77,7 @@ try:
 
     exact_solution_available = True
     exact_sol = generate_exact_solution(ufl)
+    dirichlet_data = generate_exact_solution(np)
 except ImportError:
     pass
 
@@ -88,7 +96,7 @@ fe_degree = parameters["finite_element_degree"]
 dorfler_param = parameters["marking_parameter"]
 refinement = parameters["refinement"]
 curved = parameters["curved"]
-reference = parameters_name == REFERENCE
+reference = (parameters_name == REFERENCE) or ("phifem" not in parameters_name)
 
 mesh, geoModel = gen_mesh(initial_mesh_size, curved=curved)
 
@@ -108,14 +116,10 @@ results = {
 
 num_dof = 0
 i = 0
-extra_step = 0
-if reference:
-    ref_criterion = extra_step < MAX_EXTRA_STEP
-else:
-    ref_criterion = True
+extra_adap_step = 0
+extra_unif_step = 0
+stopping_criterion = True
 
-dof_num_criterion = num_dof < MAXIMUM_DOF
-stopping_criterion = dof_num_criterion and ref_criterion
 while stopping_criterion:
     prefix = f"FEM | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
     results["iteration"].append(i)
@@ -134,11 +138,9 @@ while stopping_criterion:
         x = ufl.SpatialCoordinate(mesh)
         exact_solution = exact_sol(x)
         fh = -ufl.div(ufl.grad(exact_solution))
-        dirichlet_data = generate_exact_solution(np)
     else:
         fh = dfx.fem.Function(fe_space)
         fh.interpolate(source_term)
-        dirichlet_data = generate_dirichlet_data(np)
     gh = dfx.fem.Function(fe_space)
     gh.interpolate(dirichlet_data)
 
@@ -172,20 +174,41 @@ while stopping_criterion:
     print(df)
     df.write_csv(os.path.join(output_dir, "results.csv"))
 
-    # Marking and refinement
-    if (refinement == "adap") and dof_num_criterion:
-        write_log(prefix + "Marking.")
-        facets_indices, cells_indices = marking(est_h, dorfler_param)
-        write_log(prefix + "Refinement (adaptive).")
-        mesh = geoModel.refineMarkedElements(tdim, cells_indices)[0]
-        if curved:
-            mesh = geoModel.curveField(3)
+    if reference:
+        ref_criterion = (
+            extra_adap_step + extra_unif_step
+            < MAX_EXTRA_STEP_ADAP + MAX_EXTRA_STEP_UNIF
+        )
     else:
-        write_log(prefix + "Refinement (uniform).")
-        mesh = geoModel.refineMarkedElements(tdim, all_cells)[0]
-        if curved:
-            mesh = geoModel.curveField(3)
-        if reference:
-            extra_step += 1
+        ref_criterion = False
+    dof_num_criterion = num_dof < MAXIMUM_DOF
+    stopping_criterion = dof_num_criterion or ref_criterion
 
+    if not stopping_criterion:
+        break
+
+    unif_refinement = (refinement == "unif" and not dof_num_criterion) or (
+        extra_unif_step < MAX_EXTRA_STEP_UNIF and extra_adap_step >= MAX_EXTRA_STEP_ADAP
+    )
+    adap_refinement = (refinement == "adap" and not dof_num_criterion) or (
+        extra_adap_step < MAX_EXTRA_STEP_ADAP
+    )
+
+    # Marking and refinement
+    if unif_refinement:
+        write_log(prefix + "Refinement.")
+        mesh = dfx.mesh.refine(mesh)[0]
+        if not dof_num_criterion:
+            print(f"(EXTRA STEP (UNIF) n° {extra_unif_step + 1})")
+            extra_unif_step += 1
+        adap_refinement = False
+
+    if adap_refinement:
+        write_log(prefix + "Marking.")
+        facets_indices = marking(est_h, dorfler_param)[0]
+        write_log(prefix + "Refinement.")
+        mesh = dfx.mesh.refine(mesh, facets_indices)[0]
+        if not dof_num_criterion:
+            print(f"(EXTRA STEP (ADAP) n° {extra_adap_step + 1})")
+            extra_adap_step += 1
     i += 1

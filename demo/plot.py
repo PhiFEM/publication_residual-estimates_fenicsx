@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 
 import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
@@ -43,6 +44,31 @@ with open(os.path.join(parent_dir, "plot_parameters.yaml"), "rb") as f:
     plot_param = yaml.safe_load(f)
 
 eta_comp = np.all(["eta" in data for data in data_list])
+
+len_min = np.inf
+for parameter in parameters_list:
+    demo, param_name = parameter.split(sep="/")
+    data_path = os.path.join(
+        demo,
+        "output_" + param_name,
+        "results.csv",
+    )
+
+    source_dir = os.path.join(parent_dir, demo)
+    sys.path.append(source_dir)
+    from data import MAXIMUM_DOF
+
+    df = pl.read_csv(data_path)
+    for d in data_list:
+        ys = df[d].to_numpy()
+        d_len = np.logical_not(np.isnan(ys)).astype(int).sum()
+        if d_len < len_min:
+            len_min = d_len
+    xs = df["dof"].to_numpy()
+    d_len = np.less_equal(xs, MAXIMUM_DOF).astype(int).sum()
+    if d_len < len_min:
+        len_min = d_len
+
 for parameter in parameters_list:
     demo, param_name = parameter.split(sep="/")
 
@@ -79,9 +105,15 @@ for parameter in parameters_list:
             color = plot_param[d]["color"]
         else:
             color = plot_param[param_name]["color"]
+        len_trunc = len_min
         xs = df["dof"].to_numpy()
+        len_dof = np.less_equal(xs, MAXIMUM_DOF).astype(int).sum()
+        len_trunc = np.max([len_min, len_dof])
+        xs = xs[:len_trunc]
         try:
             ys = df[d].to_numpy()
+            # len_trunc = np.max([d_len, len_dof])
+            ys = ys[:len_trunc]
         except pl.exceptions.ColumnNotFoundError:
             print(f"{d} not found.")
             continue
@@ -94,7 +126,7 @@ for parameter in parameters_list:
             ys_not_zero = False
         if ys_not_zero:
             if rate:
-                trunc_btm = -np.maximum(-(trunc_top - 5), 0)
+                trunc_btm = -np.maximum(-(trunc_top - 10), 0)
                 if trunc_top == 0:
                     a, b = np.polyfit(
                         np.log(xs[trunc_btm:]),

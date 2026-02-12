@@ -15,13 +15,11 @@ from mpi4py import MPI
 sys.path.append("../")
 
 from utils import (
-    REFERENCE,
     cell_diameter,
     compute_boundary_error,
     compute_h10_error,
     compute_l2_error,
     nmm_interpolation,
-    save_function,
     write_log,
 )
 
@@ -63,8 +61,12 @@ else:
 
 sys.path.append(source_dir)
 
-from data import generate_levelset
+from data import MAX_EXTRA_STEP_ADAP, MAX_EXTRA_STEP_UNIF, REFERENCE, generate_levelset
 
+if "phifem" not in parameters_name:
+    REFERENCE = parameters_name
+
+max_extra_step = MAX_EXTRA_STEP_ADAP + MAX_EXTRA_STEP_UNIF
 exact_solution_available = False
 try:
     from data import generate_exact_solution
@@ -167,11 +169,28 @@ if phifem:
 results = pl.read_csv(os.path.join(output_dir, "results.csv")).to_dict()
 results["h10_error"] = [np.nan] * iterations_num
 results["l2_error"] = [np.nan] * iterations_num
-results["boundary_error"] = [np.nan] * iterations_num
-results["boundary_error_l2"] = [np.nan] * iterations_num
-results["boundary_error_h1"] = [np.nan] * iterations_num
+results["boundary_error_phih_gh"] = [np.nan] * iterations_num
+results["boundary_error_phi_g"] = [np.nan] * iterations_num
 results["phi_p_error"] = [np.nan] * iterations_num
 results["triple_norm_error"] = [np.nan] * iterations_num
+
+if parameters_name == REFERENCE:
+    iterations_num -= max_extra_step
+
+
+if "phifem" in REFERENCE:
+    reference_cells_tags = adios4dolfinx.read_meshtags(
+        os.path.join(
+            source_dir,
+            "output_" + REFERENCE,
+            "checkpoints",
+            f"checkpoint_{str(ref_max_iteration).zfill(2)}.bp",
+        ),
+        reference_mesh,
+        meshtag_name="cells_tags",
+    )
+else:
+    reference_cells_tags = None
 
 for i in range(iterations_num):
     prefix = f"REFERENCE ERROR | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
@@ -260,7 +279,11 @@ for i in range(iterations_num):
     # Compute reference H10 error
     write_log(prefix + "Compute H10 error.")
     ref_h10_norm, coarse_h10_norm = compute_h10_error(
-        solution_u_2_ref, ref_solution_h, ref_dg0_space, dg0_space
+        solution_u_2_ref,
+        ref_solution_h,
+        ref_dg0_space,
+        dg0_space,
+        ref_cells_tags=reference_cells_tags,
     )
 
     with XDMFFile(
@@ -275,32 +298,10 @@ for i in range(iterations_num):
     results["h10_error"][i] = np.sqrt(h10_err_sqd)
 
     if phifem:
-        write_log(prefix + "Compute L2 error.")
-        ref_l2_norm, coarse_l2_norm = compute_l2_error(
-            solution_u_2_ref,
-            ref_solution_h,
-            ref_dg0_space,
-            dg0_space,
-            dg0_coarse_h_T_2_ref,
-            dg0_cut_indicator_2_ref,
-        )
-
-        with XDMFFile(
-            mesh.comm,
-            os.path.join(errors_dir, f"l2_error_{str(i).zfill(2)}.xdmf"),
-            "w",
-        ) as of:
-            of.write_mesh(mesh)
-            of.write_function(coarse_l2_norm)
-
-        l2_err_sqd = ref_l2_norm.x.array.sum()
-        results["l2_error"][i] = np.sqrt(l2_err_sqd)
-
+        # Compute boundary error u - phih ph - gh
         (
-            ref_boundary_error_norm,
-            coarse_boundary_error_norm,
-            ref_boundary_error_l2_norm,
-            ref_boundary_error_h1_norm,
+            ref_boundary_error_phih_gh_norm,
+            coarse_boundary_error_phih_gh_norm,
         ) = compute_boundary_error(
             ref_solution_h,
             coarse_levelset_2_ref,
@@ -308,32 +309,58 @@ for i in range(iterations_num):
             coarse_g_h_2_ref,
             ref_dg0_space,
             dg0_cut_indicator_2_ref,
-            dg0_coarse_h_T_2_ref,
             dg0_space,
+            ref_cells_tags=reference_cells_tags,
         )
 
         with XDMFFile(
             reference_mesh.comm,
-            os.path.join(errors_dir, f"boundary_error_{str(i).zfill(2)}.xdmf"),
+            os.path.join(errors_dir, f"boundary_error_phih_gh_{str(i).zfill(2)}.xdmf"),
             "w",
         ) as of:
             of.write_mesh(mesh)
-            of.write_function(coarse_boundary_error_norm)
+            of.write_function(coarse_boundary_error_phih_gh_norm)
 
-        assert not np.any(np.isnan(ref_boundary_error_norm.x.array)), (
-            "ref_phi_p_norm.x.array contains NaNs."
+        assert not np.any(np.isnan(ref_boundary_error_phih_gh_norm.x.array)), (
+            "ref_boundary_error_phih_gh_norm.x.array contains NaNs."
         )
-        boundary_err_sqd = ref_boundary_error_norm.x.array.sum()
-        boundary_err_l2_sqd = ref_boundary_error_l2_norm.x.array.sum()
-        boundary_err_h1_sqd = ref_boundary_error_h1_norm.x.array.sum()
+        boundary_err_phih_gh_sqd = ref_boundary_error_phih_gh_norm.x.array.sum()
 
-        results["boundary_error"][i] = np.sqrt(boundary_err_sqd)
-        results["boundary_error_l2"][i] = np.sqrt(boundary_err_l2_sqd)
-        results["boundary_error_h1"][i] = np.sqrt(boundary_err_h1_sqd)
+        results["boundary_error_phih_gh"][i] = np.sqrt(boundary_err_phih_gh_sqd)
+
+        # Compute boundary error u - phi ph - g
+        (
+            ref_boundary_error_phi_g_norm,
+            coarse_boundary_error_phi_g_norm,
+        ) = compute_boundary_error(
+            ref_solution_h,
+            reference_levelset,
+            solution_p_2_ref,
+            ref_g,
+            ref_dg0_space,
+            dg0_cut_indicator_2_ref,
+            dg0_space,
+            ref_cells_tags=reference_cells_tags,
+        )
+
+        with XDMFFile(
+            reference_mesh.comm,
+            os.path.join(errors_dir, f"boundary_error_phi_g_{str(i).zfill(2)}.xdmf"),
+            "w",
+        ) as of:
+            of.write_mesh(mesh)
+            of.write_function(coarse_boundary_error_phi_g_norm)
+
+        assert not np.any(np.isnan(ref_boundary_error_phi_g_norm.x.array)), (
+            "ref_boundary_error_phi_g_norm.x.array contains NaNs."
+        )
+        boundary_err_phi_g_sqd = ref_boundary_error_phi_g_norm.x.array.sum()
+
+        results["boundary_error_phi_g"][i] = np.sqrt(boundary_err_phi_g_sqd)
 
         triple_norm_err_sqd = h10_err_sqd
-        triple_norm_err_sqd += l2_err_sqd
-        triple_norm_err_sqd += boundary_err_sqd
+        triple_norm_err_sqd += boundary_err_phih_gh_sqd
+        triple_norm_err_sqd += boundary_err_phi_g_sqd
 
         results["triple_norm_error"][i] = np.sqrt(triple_norm_err_sqd)
     else:

@@ -490,14 +490,27 @@ def marking(est_h, dorfler_param):
     return facets_indices, cells_indices
 
 
-def compute_h10_error(solution_u_2_ref, reference_solution, ref_dg0_space, dg0_space):
+def compute_h10_error(
+    solution_u_2_ref,
+    reference_solution,
+    ref_dg0_space,
+    dg0_space,
+    ref_cells_tags=None,
+):
+    if ref_cells_tags is None:
+        d_error = ufl.dx(metadata={"quadrature_degree": 20})
+    else:
+        reference_mesh = solution_u_2_ref.function_space.mesh
+        dx = ufl.Measure(
+            "dx",
+            domain=reference_mesh,
+            subdomain_data=ref_cells_tags,
+            metadata={"quadrature_degree": 20},
+        )
+        d_error = dx(1)
     grad_diff = ufl.grad(reference_solution - solution_u_2_ref)
     ref_v0 = ufl.TestFunction(ref_dg0_space)
-    h10_norm_diff = (
-        ufl.inner(grad_diff, grad_diff)
-        * ref_v0
-        * ufl.dx(metadata={"quadrature_degree": 20})
-    )
+    h10_norm_diff = ufl.inner(grad_diff, grad_diff) * ref_v0 * d_error
     h10_norm_form = dfx.fem.form(h10_norm_diff)
     h10_norm_vec = assemble_vector(h10_norm_form)
     ref_h10_norm = dfx.fem.Function(ref_dg0_space)
@@ -573,9 +586,21 @@ def compute_boundary_error(
     coarse_g_h_2_ref,
     ref_dg0_space,
     coarse_cut_indicator_2_ref,
-    coarse_h_T_2_ref,
     dg0_space,
+    ref_cells_tags=None,
 ):
+    if ref_cells_tags is None:
+        d_error = ufl.dx(metadata={"quadrature_degree": 20})
+    else:
+        reference_mesh = coarse_g_h_2_ref.function_space.mesh
+        dx = ufl.Measure(
+            "dx",
+            domain=reference_mesh,
+            subdomain_data=ref_cells_tags,
+            metadata={"quadrature_degree": 20},
+        )
+        d_error = dx(1)
+
     boundary_error_fct = (
         ref_solution
         - coarse_levelset_2_ref * coarse_solution_p_2_ref
@@ -583,35 +608,22 @@ def compute_boundary_error(
     )
 
     ref_v0 = ufl.TestFunction(ref_dg0_space)
-    boundary_error_l2_norm_int = (
-        coarse_h_T_2_ref ** (-2)
-        * coarse_cut_indicator_2_ref
-        * ufl.inner(boundary_error_fct, boundary_error_fct)
-        * ref_v0
-        * ufl.dx(metadata={"quadrature_degree": 20})
-    )
-    boundary_error_l2_norm_form = dfx.fem.form(boundary_error_l2_norm_int)
-    boundary_err_l2_vec = dfx.fem.assemble_vector(boundary_error_l2_norm_form)
 
     boundary_error_h1_norm_int = (
         coarse_cut_indicator_2_ref
         * ufl.inner(ufl.grad(boundary_error_fct), ufl.grad(boundary_error_fct))
         * ref_v0
-        * ufl.dx(metadata={"quadrature_degree": 20})
+        * d_error
     )
     boundary_error_h1_norm_form = dfx.fem.form(boundary_error_h1_norm_int)
     boundary_err_h1_vec = dfx.fem.assemble_vector(boundary_error_h1_norm_form)
 
     ref_boundary_error_norm = dfx.fem.Function(ref_dg0_space)
     ref_boundary_error_h1_norm = dfx.fem.Function(ref_dg0_space)
-    ref_boundary_error_l2_norm = dfx.fem.Function(ref_dg0_space)
     # We replace eventual NaN values with zero.
     ref_boundary_error_norm.x.array[:] = np.nan_to_num(
         boundary_err_h1_vec.array[:], copy=False, nan=0.0
-    )  # + np.nan_to_num(
-    #     boundary_err_l2_vec.array[:], copy=False, nan=0.0
-    # )
-    ref_boundary_error_l2_norm.x.array[:] = boundary_err_l2_vec.array[:]
+    )
     ref_boundary_error_h1_norm.x.array[:] = boundary_err_h1_vec.array[:]
 
     coarse_boundary_error_norm = None
@@ -633,8 +645,6 @@ def compute_boundary_error(
     return (
         ref_boundary_error_norm,
         coarse_boundary_error_norm,
-        ref_boundary_error_l2_norm,
-        ref_boundary_error_h1_norm,
     )
 
 

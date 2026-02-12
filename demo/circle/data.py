@@ -1,9 +1,8 @@
-import ngsPETSc.utils.fenicsx as ngfx
-from mpi4py import MPI
-from netgen.geom2d import SplineGeometry
-
 INITIAL_MESH_SIZE = 0.1
-MAXIMUM_DOF = 5.0e5
+MAXIMUM_DOF = 1.0e5
+REFERENCE = "phifem-bc-geo"
+MAX_EXTRA_STEP_ADAP = 2
+MAX_EXTRA_STEP_UNIF = 2
 
 
 def generate_levelset(mode):
@@ -15,12 +14,16 @@ def generate_levelset(mode):
 
 def generate_exact_solution(mode):
     def exact_solution(x):
-        return mode.sqrt((x[0] - 1.0) ** 2 + x[1] ** 2) ** (2.0 / 3.0)
+        return ((x[0] - 1.0) ** 2 + x[1] ** 2) ** (1.0 / 3.0)
 
     return exact_solution
 
 
 def gen_mesh(hmax, curved=False):
+    import ngsPETSc.utils.fenicsx as ngfx
+    from mpi4py import MPI
+    from netgen.geom2d import SplineGeometry
+
     geo = SplineGeometry()
     pnts = [
         (1, 0),
