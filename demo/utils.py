@@ -4,11 +4,12 @@ import os
 import dolfinx as dfx
 import numpy as np
 import ufl
-from basix.ufl import element
+from basix.ufl import element, mixed_element
 from dolfinx.cpp.refinement import RefinementOption
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector
 from dolfinx.io import XDMFFile
 from petsc4py import PETSc
+from phifem.mesh_scripts import compute_tags_measures
 
 parent_dir = os.path.dirname(__file__)
 
@@ -194,7 +195,7 @@ def compute_boundary_local_estimators(
     return geo_dg0, fine_submesh_tags, fine_submesh
 
 
-def phifem_direct_solve(spaces, fh, phih, measures, coefs):
+def _phifem_direct_solve(spaces, fh, phih, measures, coefs):
     fe_space, solution_space = (spaces["primal"], spaces["solution"])
     dx, dS, ds = (measures["dx"], measures["dS"], measures["ds"])
     stab_coef = coefs["stabilization"]
@@ -263,7 +264,7 @@ def phifem_direct_solve(spaces, fh, phih, measures, coefs):
     return solution_u, solution_w
 
 
-def phifem_dual_solve(mixed_space, fh, gh, phih, measures, coefs):
+def _phifem_dual_solve(mixed_space, fh, gh, phih, measures, coefs):
     dx, dS, ds = (measures["dx"], measures["dS"], measures["ds"])
     pen_coef, stab_coef = (coefs["penalization"], coefs["stabilization"])
 
@@ -768,3 +769,83 @@ def save_function(fct, path):
         with XDMFFile(mesh.comm, path + ".xdmf", "w") as of:
             of.write_mesh(mesh)
             of.write_function(fct)
+
+
+def phifem_solve(
+    mesh, degrees, coefs, detection_parameters, data, prefix, exact_solution=False
+):
+    generate_detection_levelset, discretize_levelset, single_layer = (
+        detection_parameters
+    )
+    cell_name = mesh.topology.cell_name()
+    levelset_element = element("Lagrange", cell_name, degrees["levelset"])
+    levelset_bg_space = dfx.fem.functionspace(mesh, levelset_element)
+    if discretize_levelset:
+        detection_levelset = dfx.fem.Function(levelset_bg_space)
+        detection_levelset.interpolate(generate_detection_levelset(np))
+    else:
+        detection_levelset = generate_detection_levelset(ufl)
+    write_log(prefix + "Computation of mesh tags")
+    cells_tags, facets_tags, _, ds, _, _ = compute_tags_measures(
+        mesh,
+        detection_levelset,
+        degrees["detection"],
+        box_mode=True,
+        single_layer_cut=single_layer,
+    )
+
+    dx = ufl.Measure("dx", domain=mesh, subdomain_data=cells_tags)
+    dS = ufl.Measure("dS", domain=mesh, subdomain_data=facets_tags)
+    measures = {"dx": dx, "dS": dS, "ds": ds}
+
+    fe_element = element("Lagrange", cell_name, degrees["fe"])
+    aux_element = element("Lagrange", cell_name, degrees["aux"])
+    mxd_element = mixed_element([fe_element, aux_element])
+    mixed_space = dfx.fem.functionspace(mesh, mxd_element)
+    fe_space = dfx.fem.functionspace(mesh, fe_element)
+    aux_space = dfx.fem.functionspace(mesh, aux_element)
+    levelset_space = dfx.fem.functionspace(mesh, levelset_element)
+
+    omega_h_cells = np.union1d(cells_tags.find(1), cells_tags.find(2))
+    cdim = mesh.topology.dim
+    mesh.topology.create_connectivity(cdim, cdim)
+    fe_active_dofs = dfx.fem.locate_dofs_topological(fe_space, cdim, omega_h_cells)
+    aux_active_dofs = dfx.fem.locate_dofs_topological(
+        aux_space, cdim, cells_tags.find(2)
+    )
+
+    num_dof = len(fe_active_dofs) + len(aux_active_dofs)
+
+    levelset = data["levelset"](np)
+    phih = dfx.fem.Function(levelset_space)
+    phih.interpolate(levelset, cells_tags.find(2))
+
+    if not exact_solution:
+        dirichlet_data = data["dirichlet"](np)
+        source_term = data["source_term"](np)
+        fh = dfx.fem.Function(fe_space)
+        fh.interpolate(source_term)
+        gh = dfx.fem.Function(fe_space)
+        gh.interpolate(dirichlet_data)
+    else:
+        x = ufl.SpatialCoordinate(mesh)
+        exact_solution = data["exact_solution"](ufl)(x)
+        dirichlet_data = data["exact_solution"](np)
+        fh = -ufl.div(ufl.grad(exact_solution))
+        gh = dfx.fem.Function(fe_space)
+        gh.interpolate(dirichlet_data)
+
+    solution_u, solution_p = _phifem_dual_solve(
+        mixed_space, fh, gh, phih, measures, coefs
+    )
+    return (
+        solution_u,
+        solution_p,
+        fh,
+        gh,
+        num_dof,
+        levelset,
+        cells_tags,
+        facets_tags,
+        measures,
+    )

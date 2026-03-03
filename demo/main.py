@@ -9,13 +9,13 @@ import numpy as np
 import polars as pl
 import ufl
 import yaml
-from basix.ufl import element, mixed_element
+from basix.ufl import element
 from mpi4py import MPI
 from phifem.mesh_scripts import compute_tags_measures
 from utils import (
     compute_boundary_local_estimators,
     marking,
-    phifem_dual_solve,
+    phifem_solve,
     residual_estimation,
     save_function,
     write_log,
@@ -110,6 +110,13 @@ initial_mesh_size = INITIAL_MESH_SIZE
 fe_degree = parameters["finite_element_degree"]
 levelset_degree = parameters["levelset_degree"]
 detection_degree = parameters["boundary_detection_degree"]
+auxiliary_degree = parameters["auxiliary_degree"]
+degrees = {
+    "fe": fe_degree,
+    "levelset": levelset_degree,
+    "detection": detection_degree,
+    "aux": auxiliary_degree,
+}
 pen_coef = parameters["penalization_coefficient"]
 stab_coef = parameters["stabilization_coefficient"]
 coefs = {"penalization": pen_coef, "stabilization": stab_coef}
@@ -117,12 +124,11 @@ dorfler_param = parameters["marking_parameter"]
 bbox = parameters["bbox"]
 refinement = parameters["refinement"]
 boundary_correction = parameters["boundary_correction"]
-auxiliary_degree = parameters["auxiliary_degree"]
-discretize_levelset = parameters["discretize_levelset"]
 dirichlet_estimator = parameters["dirichlet_estimator"]
-single_layer = parameters["single_layer"]
 reference = parameters_name == REFERENCE
-
+discretize_levelset = parameters["discretize_levelset"]
+single_layer = parameters["single_layer"]
+detection_parameters = [generate_detection_levelset, discretize_levelset, single_layer]
 # Create background mesh
 nx = int(np.abs(bbox[0][1] - bbox[0][0]) / initial_mesh_size / np.sqrt(2.0))
 ny = int(np.abs(bbox[1][1] - bbox[1][0]) / initial_mesh_size / np.sqrt(2.0))
@@ -153,36 +159,37 @@ while stopping_criterion:
     cell_name = mesh.topology.cell_name()
     levelset_element = element("Lagrange", cell_name, levelset_degree)
     levelset_bg_space = dfx.fem.functionspace(mesh, levelset_element)
-    if discretize_levelset:
-        detection_levelset = dfx.fem.Function(levelset_bg_space)
-        detection_levelset.interpolate(generate_detection_levelset(np))
-    else:
-        detection_levelset = generate_detection_levelset(ufl)
     write_log(prefix + "Computation of mesh tags")
-    cells_tags, facets_tags, _, ds, _, _ = compute_tags_measures(
-        mesh,
-        detection_levelset,
-        detection_degree,
-        box_mode=True,
-        single_layer_cut=single_layer,
-    )
-
     results["iteration"].append(i)
 
-    dx = ufl.Measure("dx", domain=mesh, subdomain_data=cells_tags)
-    dS = ufl.Measure("dS", domain=mesh, subdomain_data=facets_tags)
+    data_fcts = {"levelset": generate_levelset}
+    if exact_solution_available:
+        data_fcts["exact_solution"] = generate_exact_solution
+    else:
+        data_fcts["dirichlet"] = generate_dirichlet_data
+        data_fcts["source_term"] = generate_source_term
 
-    measures = {"dx": dx, "dS": dS, "ds": ds}
+    (
+        solution_u,
+        solution_p,
+        fh,
+        gh,
+        num_dof,
+        levelset,
+        cells_tags,
+        facets_tags,
+        measures,
+    ) = phifem_solve(
+        mesh,
+        degrees,
+        coefs,
+        detection_parameters,
+        data_fcts,
+        prefix,
+        exact_solution=exact_solution_available,
+    )
 
-    h_T = ufl.CellDiameter(mesh)
-    n = ufl.FacetNormal(mesh)
-
-    fe_element = element("Lagrange", cell_name, fe_degree)
-    aux_element = element("Lagrange", cell_name, auxiliary_degree)
-    mxd_element = mixed_element([fe_element, aux_element])
-    mixed_space = dfx.fem.functionspace(mesh, mxd_element)
-    fe_space = dfx.fem.functionspace(mesh, fe_element)
-    aux_space = dfx.fem.functionspace(mesh, aux_element)
+    results["dof"].append(num_dof)
 
     dg0_element = element("DG", cell_name, 0)
     dg0_space = dfx.fem.functionspace(mesh, dg0_element)
@@ -210,27 +217,12 @@ while stopping_criterion:
         os.path.join(output_dir, tags_dir, f"facets_tags_{str(i).zfill(2)}"),
     )
 
-    levelset_space = dfx.fem.functionspace(mesh, levelset_element)
-
-    omega_h_cells = np.union1d(cells_tags.find(1), cells_tags.find(2))
-    cdim = mesh.topology.dim
-    mesh.topology.create_connectivity(cdim, cdim)
-    fe_active_dofs = dfx.fem.locate_dofs_topological(fe_space, cdim, omega_h_cells)
-    aux_active_dofs = dfx.fem.locate_dofs_topological(
-        aux_space, cdim, cells_tags.find(2)
-    )
-
-    num_dof = len(fe_active_dofs) + len(aux_active_dofs)
-    results["dof"].append(num_dof)
-
     checkpoint_file = os.path.join(checkpoint_dir, f"checkpoint_{str(i).zfill(2)}.bp")
     adios4dolfinx.write_mesh(checkpoint_file, mesh)
 
-    levelset = generate_levelset(np)
-    phih = dfx.fem.Function(levelset_space)
-
+    phih = dfx.fem.Function(levelset_bg_space)
     phih.interpolate(levelset, cells_tags.find(2))
-    phih_plot = dfx.fem.Function(levelset_space)
+    phih_plot = dfx.fem.Function(levelset_bg_space)
     phih_plot.interpolate(levelset)
 
     adios4dolfinx.write_function(checkpoint_file, phih_plot, name="levelset")
@@ -238,38 +230,6 @@ while stopping_criterion:
     save_function(
         phih_plot,
         os.path.join(levelsets_dir, f"levelset_{str(i).zfill(2)}"),
-    )
-
-    u_space = dfx.fem.functionspace(mesh, fe_element)
-
-    if not exact_solution_available:
-        dirichlet_data = generate_dirichlet_data(np)
-        source_term = generate_source_term(np)
-        fh = dfx.fem.Function(u_space)
-        fh.interpolate(source_term)
-        gh = dfx.fem.Function(u_space)
-        gh.interpolate(dirichlet_data)
-        save_function(fh, os.path.join(data_dir, f"source_term_{str(i).zfill(2)}"))
-        save_function(gh, os.path.join(data_dir, f"dirichlet_data_{str(i).zfill(2)}"))
-        save_function(
-            fh,
-            os.path.join(data_dir, f"source_term_{str(i).zfill(2)}"),
-        )
-        save_function(
-            gh,
-            os.path.join(data_dir, f"dirichlet_data_{str(i).zfill(2)}"),
-        )
-    else:
-        x = ufl.SpatialCoordinate(mesh)
-        exact_solution = generate_exact_solution(ufl)(x)
-        dirichlet_data = generate_exact_solution(np)
-        fh = -ufl.div(ufl.grad(exact_solution))
-        gh = dfx.fem.Function(u_space)
-        gh.interpolate(dirichlet_data)
-
-    write_log(prefix + "phiFEM solve.")
-    solution_u, solution_p = phifem_dual_solve(
-        mixed_space, fh, gh, phih, measures, coefs
     )
 
     save_function(
@@ -291,6 +251,8 @@ while stopping_criterion:
 
     # Residual error estimation
     write_log(prefix + "Residual estimation.")
+    dx = measures["dx"]
+    dS = measures["dS"]
     eta_dict = residual_estimation(
         dg0_space,
         solution_u,
@@ -314,7 +276,7 @@ while stopping_criterion:
                 mesh,
                 solution_u,
                 solution_p,
-                dirichlet_data,
+                data["dirichlet"],
                 gh,
                 levelset,
                 phih,
