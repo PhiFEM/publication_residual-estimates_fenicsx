@@ -50,10 +50,14 @@ for parameter in parameters_list:
     df = pl.read_csv(data_path)
     if "phifem" in param_name:
         est = "\\eta"
+        err = "E"
+        err_name = "triple_norm_error"
     else:
         est = "\\eta_1"
+        err = "|e|_{{1,\\Omega}}"
+        err_name = "h10_error"
     xs = df["dof"].to_numpy()
-    ys = df["estimator"].to_numpy() / df["h10_error"].to_numpy()
+    ys = df["estimator"].to_numpy() / df[err_name].to_numpy()
     mask = np.isnan(ys)
     xs = xs[~mask]
     ys = ys[~mask]
@@ -62,7 +66,7 @@ for parameter in parameters_list:
         ys,
         style + "^",
         color=color,
-        label=f"${est}/|e|_{{1,\\Omega}}$, " + f"{scheme_name}",
+        label=f"${est}/{err}$, " + f"{scheme_name}",
         path_effects=[
             pe.Stroke(linewidth=2.5, foreground="#252525"),
             pe.Normal(),
