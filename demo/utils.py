@@ -772,7 +772,7 @@ def save_function(fct, path):
 
 
 def phifem_solve(
-    mesh, degrees, coefs, detection_parameters, data, prefix, exact_solution=False
+    mesh, degrees, coefs, detection_parameters, data, prefix="", exact_solution=False
 ):
     generate_detection_levelset, discretize_levelset, single_layer = (
         detection_parameters

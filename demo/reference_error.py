@@ -11,6 +11,7 @@ import yaml
 from basix.ufl import element
 from dolfinx.io import XDMFFile
 from mpi4py import MPI
+from phifem.mesh_scripts import compute_tags_measures
 
 sys.path.append("../")
 
@@ -18,8 +19,8 @@ from utils import (
     cell_diameter,
     compute_boundary_error,
     compute_h10_error,
-    compute_l2_error,
     nmm_interpolation,
+    phifem_solve,
     write_log,
 )
 
@@ -61,12 +62,15 @@ else:
 
 sys.path.append(source_dir)
 
-from data import MAX_EXTRA_STEP_ADAP, MAX_EXTRA_STEP_UNIF, REFERENCE, generate_levelset
+from data import (
+    MAX_EXTRA_STEP_UNIF,
+    generate_exact_solution,
+    generate_levelset,
+)
 
 if "phifem" not in parameters_name:
     REFERENCE = parameters_name
 
-max_extra_step = MAX_EXTRA_STEP_ADAP + MAX_EXTRA_STEP_UNIF
 exact_solution_available = False
 try:
     from data import generate_exact_solution
@@ -78,44 +82,104 @@ except ImportError:
 if not exact_solution_available:
     from data import generate_dirichlet_data, generate_source_term
 
+    data_fcts = {
+        "dirichlet": generate_dirichlet_data,
+        "source_term": generate_source_term,
+    }
+
 with open(os.path.join(source_dir, parameters_name + ".yaml"), "rb") as f:
     parameters = yaml.safe_load(f)
-
-nums = []
-for f in os.listdir(
-    os.path.join(source_dir, "output_" + parameters_name, "checkpoints")
-):
-    if f.endswith(".bp"):
-        num = f[:-3].split(sep="_")[-1]
-        nums.append(int(num))
-iterations_num = sorted(nums)[-1] + 1
-
 fe_degree = parameters["finite_element_degree"]
+
 phifem = "phifem" in parameters_name
 if phifem:
+    try:
+        from data import generate_detection_levelset
+    except ImportError:
+        from data import generate_levelset
+
+        generate_detection_levelset = generate_levelset
+
     levelset_degree = parameters["levelset_degree"]
 
-with open(os.path.join(source_dir, REFERENCE + ".yaml"), "rb") as f:
-    ref_parameters = yaml.safe_load(f)
-
-ref_degree = ref_parameters["finite_element_degree"]
+detection_degree = parameters["boundary_detection_degree"]
+auxiliary_degree = parameters["auxiliary_degree"]
+degrees = {
+    "fe": fe_degree,
+    "levelset": levelset_degree,
+    "detection": detection_degree,
+    "aux": auxiliary_degree,
+}
+pen_coef = parameters["penalization_coefficient"]
+stab_coef = parameters["stabilization_coefficient"]
+coefs = {"penalization": pen_coef, "stabilization": stab_coef}
+discretize_levelset = parameters["discretize_levelset"]
+single_layer = parameters["single_layer"]
+detection_parameters = [generate_detection_levelset, discretize_levelset, single_layer]
 
 nums = []
-for f in os.listdir(os.path.join(source_dir, "output_" + REFERENCE, "checkpoints")):
+for f in os.listdir(checkpoint_dir):
     if f.endswith(".bp"):
         num = f[:-3].split(sep="_")[-1]
         nums.append(int(num))
-ref_max_iteration = sorted(nums)[-1]
+max_iteration = sorted(nums)[-1]
 
 reference_mesh = adios4dolfinx.read_mesh(
     os.path.join(
-        source_dir,
-        "output_" + REFERENCE,
-        "checkpoints",
-        f"checkpoint_{str(ref_max_iteration).zfill(2)}.bp",
+        checkpoint_dir,
+        f"checkpoint_{str(max_iteration).zfill(2)}.bp",
     ),
     comm=MPI.COMM_WORLD,
 )
+cell_name = reference_mesh.topology.cell_name()
+fe_element = element("CG", cell_name, fe_degree)
+
+for i in range(MAX_EXTRA_STEP_UNIF):
+    reference_mesh.topology.create_entities(1)
+    reference_mesh = dfx.mesh.refine(reference_mesh)[0]
+
+if phifem:
+    levelset_element = element("Lagrange", cell_name, levelset_degree)
+    reference_levelset_space = dfx.fem.functionspace(reference_mesh, levelset_element)
+
+reference_fe_space = dfx.fem.functionspace(reference_mesh, fe_element)
+
+if ("phifem" in parameters_name) or exact_solution_available:
+    reference_solution = dfx.fem.Function(reference_fe_space)
+    reference_solution.interpolate(generate_exact_solution(np))
+    reference_detection_levelset = dfx.fem.Function(reference_levelset_space)
+    reference_detection_levelset.interpolate(generate_detection_levelset(np))
+    reference_cells_tags, _, _, _, _, _ = compute_tags_measures(
+        reference_mesh,
+        reference_detection_levelset,
+        degrees["detection"],
+        box_mode=True,
+        single_layer_cut=single_layer,
+    )
+    ref_g = dfx.fem.Function(reference_fe_space)
+    if exact_solution_available:
+        ref_g = reference_solution
+    else:
+        ref_g.interpolate(generate_dirichlet_data(np))
+
+elif "phifem" in parameters_name:
+    (
+        reference_solution,
+        _,
+        ref_f,
+        ref_g,
+        _,
+        reference_levelset,
+        reference_cells_tags,
+        _,
+        reference_measures,
+    ) = phifem_solve(reference_mesh, degrees, coefs, detection_parameters, data_fcts)[0]
+else:
+    pass
+    # reference_solution = fem_solve(
+    #     reference_mesh, degrees, coefs, detection_parameters, data_fcts
+    # )[0]
+
 
 cdim = reference_mesh.topology.dim
 num_reference_cells = reference_mesh.topology.index_map(cdim).size_global
@@ -124,41 +188,11 @@ cell_name = reference_mesh.topology.cell_name()
 
 # Define finite elements and reference FE spaces
 cg1_element = element("Lagrange", cell_name, fe_degree)
-ref_element = element("Lagrange", cell_name, ref_degree)
-if phifem:
-    levelset_element = element("Lagrange", cell_name, levelset_degree)
-    reference_levelset_space = dfx.fem.functionspace(reference_mesh, levelset_element)
+ref_element = element("Lagrange", cell_name, fe_degree)
 dg0_element = element("DG", cell_name, 0)
 
 reference_space = dfx.fem.functionspace(reference_mesh, ref_element)
 ref_dg0_space = dfx.fem.functionspace(reference_mesh, dg0_element)
-
-# Load reference source terms
-if not exact_solution_available:
-    write_log("Read reference solution.")
-    dirichlet_data = generate_dirichlet_data(np)
-
-    # Load reference solution
-    ref_solution_h = dfx.fem.Function(reference_space)
-    adios4dolfinx.read_function(
-        os.path.join(
-            source_dir,
-            "output_" + REFERENCE,
-            "checkpoints",
-            f"checkpoint_{str(ref_max_iteration).zfill(2)}.bp",
-        ),
-        ref_solution_h,
-        name="solution_u",
-    )
-else:
-    write_log("Interpolate analytical solution.")
-    dirichlet_data = generate_exact_solution(np)
-    ref_soluton_np = generate_exact_solution(np)
-    ref_solution_h = dfx.fem.Function(reference_space)
-    ref_solution_h.interpolate(ref_soluton_np)
-
-ref_g = dfx.fem.Function(reference_space)
-ref_g.interpolate(dirichlet_data)
 
 if phifem:
     levelset = generate_levelset(np)
@@ -167,30 +201,13 @@ if phifem:
 
 # Allocate memory for results
 results = pl.read_csv(os.path.join(output_dir, "results.csv")).to_dict()
+iterations_num = len(results["iteration"])
 results["h10_error"] = [np.nan] * iterations_num
 results["l2_error"] = [np.nan] * iterations_num
 results["boundary_error_phih_gh"] = [np.nan] * iterations_num
 results["boundary_error_phi_g"] = [np.nan] * iterations_num
 results["phi_p_error"] = [np.nan] * iterations_num
 results["triple_norm_error"] = [np.nan] * iterations_num
-
-if parameters_name == REFERENCE:
-    iterations_num -= max_extra_step
-
-
-if "phifem" in REFERENCE:
-    reference_cells_tags = adios4dolfinx.read_meshtags(
-        os.path.join(
-            source_dir,
-            "output_" + REFERENCE,
-            "checkpoints",
-            f"checkpoint_{str(ref_max_iteration).zfill(2)}.bp",
-        ),
-        reference_mesh,
-        meshtag_name="cells_tags",
-    )
-else:
-    reference_cells_tags = None
 
 for i in range(iterations_num):
     prefix = f"REFERENCE ERROR | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
@@ -214,7 +231,10 @@ for i in range(iterations_num):
     solution_u = dfx.fem.Function(fe_space)
     solution_p = dfx.fem.Function(aux_space)
     coarse_g_h = dfx.fem.Function(fe_space)
-    coarse_g_h.interpolate(dirichlet_data)
+    if exact_solution_available:
+        coarse_g_h.interpolate(generate_exact_solution(np))
+    else:
+        coarse_g_h.interpolate(generate_dirichlet_data(np))
 
     write_log(prefix + "Load solution_u.")
     adios4dolfinx.read_function(
@@ -280,7 +300,7 @@ for i in range(iterations_num):
     write_log(prefix + "Compute H10 error.")
     ref_h10_norm, coarse_h10_norm = compute_h10_error(
         solution_u_2_ref,
-        ref_solution_h,
+        reference_solution,
         ref_dg0_space,
         dg0_space,
         ref_cells_tags=reference_cells_tags,
@@ -303,7 +323,7 @@ for i in range(iterations_num):
             ref_boundary_error_phih_gh_norm,
             coarse_boundary_error_phih_gh_norm,
         ) = compute_boundary_error(
-            ref_solution_h,
+            reference_solution,
             coarse_levelset_2_ref,
             solution_p_2_ref,
             coarse_g_h_2_ref,
@@ -333,7 +353,7 @@ for i in range(iterations_num):
             ref_boundary_error_phi_g_norm,
             coarse_boundary_error_phi_g_norm,
         ) = compute_boundary_error(
-            ref_solution_h,
+            reference_solution,
             reference_levelset,
             solution_p_2_ref,
             ref_g,

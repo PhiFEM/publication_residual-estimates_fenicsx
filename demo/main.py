@@ -7,11 +7,9 @@ import adios4dolfinx
 import dolfinx as dfx
 import numpy as np
 import polars as pl
-import ufl
 import yaml
 from basix.ufl import element
 from mpi4py import MPI
-from phifem.mesh_scripts import compute_tags_measures
 from utils import (
     compute_boundary_local_estimators,
     marking,
@@ -77,10 +75,7 @@ sys.path.append(source_dir)
 
 from data import (
     INITIAL_MESH_SIZE,
-    MAX_EXTRA_STEP_ADAP,
-    MAX_EXTRA_STEP_UNIF,
     MAXIMUM_DOF,
-    REFERENCE,
     generate_levelset,
 )
 
@@ -125,7 +120,6 @@ bbox = parameters["bbox"]
 refinement = parameters["refinement"]
 boundary_correction = parameters["boundary_correction"]
 dirichlet_estimator = parameters["dirichlet_estimator"]
-reference = parameters_name == REFERENCE
 discretize_levelset = parameters["discretize_levelset"]
 single_layer = parameters["single_layer"]
 detection_parameters = [generate_detection_levelset, discretize_levelset, single_layer]
@@ -165,6 +159,7 @@ while stopping_criterion:
     data_fcts = {"levelset": generate_levelset}
     if exact_solution_available:
         data_fcts["exact_solution"] = generate_exact_solution
+        data_fcts["dirichlet"] = generate_exact_solution
     else:
         data_fcts["dirichlet"] = generate_dirichlet_data
         data_fcts["source_term"] = generate_source_term
@@ -276,7 +271,7 @@ while stopping_criterion:
                 mesh,
                 solution_u,
                 solution_p,
-                data["dirichlet"],
+                data_fcts["dirichlet"](np),
                 gh,
                 levelset,
                 phih,
@@ -304,42 +299,21 @@ while stopping_criterion:
     print(df)
     df.write_csv(os.path.join(output_dir, "results.csv"))
 
-    if reference:
-        ref_criterion = (
-            extra_adap_step + extra_unif_step
-            < MAX_EXTRA_STEP_ADAP + MAX_EXTRA_STEP_UNIF
-        )
-    else:
-        ref_criterion = False
     dof_num_criterion = num_dof < MAXIMUM_DOF
-    stopping_criterion = dof_num_criterion or ref_criterion
+    stopping_criterion = dof_num_criterion
 
     if not stopping_criterion:
         break
 
-    unif_refinement = (refinement == "unif" and not dof_num_criterion) or (
-        extra_unif_step < MAX_EXTRA_STEP_UNIF and extra_adap_step >= MAX_EXTRA_STEP_ADAP
-    )
-    adap_refinement = (refinement == "adap" and not dof_num_criterion) or (
-        extra_adap_step < MAX_EXTRA_STEP_ADAP
-    )
-
     # Marking and refinement
-    if unif_refinement:
+    if refinement == "unif":
         write_log(prefix + "Refinement.")
         mesh = dfx.mesh.refine(mesh)[0]
-        if not dof_num_criterion:
-            print(f"(EXTRA STEP (UNIF) n° {extra_unif_step + 1})")
-            extra_unif_step += 1
-        adap_refinement = False
 
-    if adap_refinement:
+    if refinement == "adap":
         write_log(prefix + "Marking.")
         facets_indices = marking(est_h, dorfler_param)[0]
         write_log(prefix + "Refinement.")
         mesh = dfx.mesh.refine(mesh, facets_indices)[0]
-        if not dof_num_criterion:
-            print(f"(EXTRA STEP (ADAP) n° {extra_adap_step + 1})")
-            extra_adap_step += 1
 
     i += 1
