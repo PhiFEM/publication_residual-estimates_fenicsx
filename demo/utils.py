@@ -580,9 +580,9 @@ def compute_l2_error(
 
 def compute_boundary_error(
     ref_solution,
-    coarse_levelset_2_ref,
+    levelset,
     coarse_solution_p_2_ref,
-    coarse_g_h_2_ref,
+    g,
     ref_dg0_space,
     coarse_cut_indicator_2_ref,
     dg0_space,
@@ -591,7 +591,7 @@ def compute_boundary_error(
     if ref_cells_tags is None:
         d_error = ufl.dx(metadata={"quadrature_degree": 20})
     else:
-        reference_mesh = coarse_g_h_2_ref.function_space.mesh
+        reference_mesh = g.function_space.mesh
         dx = ufl.Measure(
             "dx",
             domain=reference_mesh,
@@ -600,11 +600,7 @@ def compute_boundary_error(
         )
         d_error = dx(1)
 
-    boundary_error_fct = (
-        ref_solution
-        - coarse_levelset_2_ref * coarse_solution_p_2_ref
-        - coarse_g_h_2_ref
-    )
+    boundary_error_fct = ref_solution - levelset * coarse_solution_p_2_ref - g
 
     ref_v0 = ufl.TestFunction(ref_dg0_space)
 
@@ -644,6 +640,56 @@ def compute_boundary_error(
     return (
         ref_boundary_error_norm,
         coarse_boundary_error_norm,
+    )
+
+
+def compute_levelset_error(
+    ref_levelset,
+    coarse_levelset,
+    ref_dg0_space,
+    coarse_cut_indicator_2_ref,
+    dg0_space,
+):
+    levelset_error_fct = ufl.sign(ref_levelset) - ufl.sign(coarse_levelset)
+
+    ref_v0 = ufl.TestFunction(ref_dg0_space)
+
+    levelset_error_int = (
+        coarse_cut_indicator_2_ref
+        * ufl.inner(levelset_error_fct, levelset_error_fct)
+        * ref_v0
+        * ufl.dx
+    )
+    levelset_error_norm_form = dfx.fem.form(levelset_error_int)
+    levelset_err_vec = dfx.fem.assemble_vector(levelset_error_norm_form)
+
+    ref_levelset_error_norm = dfx.fem.Function(ref_dg0_space)
+    ref_boundary_error_h1_norm = dfx.fem.Function(ref_dg0_space)
+    # We replace eventual NaN values with zero.
+    ref_levelset_error_norm.x.array[:] = np.nan_to_num(
+        levelset_err_vec.array[:], copy=False, nan=0.0
+    )
+    ref_boundary_error_h1_norm.x.array[:] = levelset_err_vec.array[:]
+
+    coarse_levelset_error_norm = None
+    try:
+        coarse_mesh = dg0_space.mesh
+        cdim = coarse_mesh.geometry.dim
+        num_cells = coarse_mesh.topology.index_map(cdim).size_global
+        all_cells = np.arange(num_cells)
+        nmm_ref_space2coarse_space = dfx.fem.create_interpolation_data(
+            dg0_space, ref_dg0_space, all_cells, padding=1.0e-20
+        )
+        coarse_levelset_error_norm = dfx.fem.Function(dg0_space)
+        coarse_levelset_error_norm.interpolate_nonmatching(
+            ref_levelset_error_norm, all_cells, nmm_ref_space2coarse_space
+        )
+    except RuntimeError:
+        print("Failed to interpolate l2_norm to coarse space.")
+        pass
+    return (
+        ref_levelset_error_norm,
+        coarse_levelset_error_norm,
     )
 
 

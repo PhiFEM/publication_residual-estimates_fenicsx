@@ -19,6 +19,7 @@ from utils import (
     cell_diameter,
     compute_boundary_error,
     compute_h10_error,
+    compute_levelset_error,
     nmm_interpolation,
     phifem_solve,
     write_log,
@@ -48,11 +49,6 @@ output_dir = os.path.join(source_dir, "output_" + parameters_name)
 checkpoint_dir = os.path.join(output_dir, "checkpoints")
 
 errors_dir = os.path.join(output_dir, "errors")
-dirs = [
-    output_dir,
-    checkpoint_dir,
-    errors_dir,
-]
 
 if os.path.isdir(errors_dir):
     shutil.rmtree(errors_dir)
@@ -64,7 +60,6 @@ sys.path.append(source_dir)
 
 from data import (
     MAX_EXTRA_STEP_UNIF,
-    generate_exact_solution,
     generate_levelset,
 )
 
@@ -79,6 +74,7 @@ try:
 except ImportError:
     pass
 
+data_fcts = {}
 if not exact_solution_available:
     from data import generate_dirichlet_data, generate_source_term
 
@@ -93,12 +89,14 @@ fe_degree = parameters["finite_element_degree"]
 
 phifem = "phifem" in parameters_name
 if phifem:
+    from data import generate_levelset
+
     try:
         from data import generate_detection_levelset
     except ImportError:
-        from data import generate_levelset
-
         generate_detection_levelset = generate_levelset
+
+    data_fcts["levelset"] = generate_levelset
 
     levelset_degree = parameters["levelset_degree"]
 
@@ -144,7 +142,7 @@ if phifem:
 
 reference_fe_space = dfx.fem.functionspace(reference_mesh, fe_element)
 
-if ("phifem" in parameters_name) or exact_solution_available:
+if ("phifem" in parameters_name) and exact_solution_available:
     reference_solution = dfx.fem.Function(reference_fe_space)
     reference_solution.interpolate(generate_exact_solution(np))
     reference_detection_levelset = dfx.fem.Function(reference_levelset_space)
@@ -173,7 +171,7 @@ elif "phifem" in parameters_name:
         reference_cells_tags,
         _,
         reference_measures,
-    ) = phifem_solve(reference_mesh, degrees, coefs, detection_parameters, data_fcts)[0]
+    ) = phifem_solve(reference_mesh, degrees, coefs, detection_parameters, data_fcts)
 else:
     pass
     # reference_solution = fem_solve(
@@ -208,6 +206,7 @@ results["boundary_error_phih_gh"] = [np.nan] * iterations_num
 results["boundary_error_phi_g"] = [np.nan] * iterations_num
 results["phi_p_error"] = [np.nan] * iterations_num
 results["triple_norm_error"] = [np.nan] * iterations_num
+results["levelset_error"] = [np.nan] * iterations_num
 
 for i in range(iterations_num):
     prefix = f"REFERENCE ERROR | Iteration: {str(i).zfill(2)} | Test case: {demo} | Method: {parameters_name} | "
@@ -334,12 +333,22 @@ for i in range(iterations_num):
         )
 
         with XDMFFile(
-            reference_mesh.comm,
+            mesh.comm,
             os.path.join(errors_dir, f"boundary_error_phih_gh_{str(i).zfill(2)}.xdmf"),
             "w",
         ) as of:
             of.write_mesh(mesh)
             of.write_function(coarse_boundary_error_phih_gh_norm)
+
+        with XDMFFile(
+            reference_mesh.comm,
+            os.path.join(
+                errors_dir, f"ref_boundary_error_phih_gh_{str(i).zfill(2)}.xdmf"
+            ),
+            "w",
+        ) as of:
+            of.write_mesh(reference_mesh)
+            of.write_function(ref_boundary_error_phih_gh_norm)
 
         assert not np.any(np.isnan(ref_boundary_error_phih_gh_norm.x.array)), (
             "ref_boundary_error_phih_gh_norm.x.array contains NaNs."
@@ -371,6 +380,16 @@ for i in range(iterations_num):
             of.write_mesh(mesh)
             of.write_function(coarse_boundary_error_phi_g_norm)
 
+        with XDMFFile(
+            reference_mesh.comm,
+            os.path.join(
+                errors_dir, f"ref_boundary_error_phi_g_{str(i).zfill(2)}.xdmf"
+            ),
+            "w",
+        ) as of:
+            of.write_mesh(reference_mesh)
+            of.write_function(ref_boundary_error_phi_g_norm)
+
         assert not np.any(np.isnan(ref_boundary_error_phi_g_norm.x.array)), (
             "ref_boundary_error_phi_g_norm.x.array contains NaNs."
         )
@@ -383,6 +402,17 @@ for i in range(iterations_num):
         triple_norm_err_sqd += boundary_err_phi_g_sqd
 
         results["triple_norm_error"][i] = np.sqrt(triple_norm_err_sqd)
+
+        ref_levelset_err, _ = compute_levelset_error(
+            reference_levelset,
+            coarse_levelset_2_ref,
+            ref_dg0_space,
+            dg0_cut_indicator_2_ref,
+            dg0_space,
+        )
+
+        levelset_error = ref_levelset_err.x.array.sum()
+        results["levelset_error"][i] = np.sqrt(levelset_error)
     else:
         results["triple_norm_error"][i] = np.nan
 

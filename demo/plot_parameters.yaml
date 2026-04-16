@@ -1,6 +1,6 @@
 phifem: 
-  name: "$\\varphi$-FEM, $\\eta_{\\overline{\\mathrm{BC}}{,}\\overline{\\mathrm{geo}}}$"
-  estimator_name: "$\\eta_{\\overline{\\mathrm{BC}}{,}\\overline{\\mathrm{geo}}}$"
+  name: "$\\varphi$-FEM, $\\eta_{\\mathrm{FEM}}$"
+  estimator_name: "$\\eta_{\\mathrm{FEM}}$"
   color: "#abd9e9"
 phifem-bc:
   name: "$\\varphi$-FEM, $\\eta_{\\overline{\\mathrm{geo}}}$"
@@ -11,15 +11,15 @@ phifem-geo:
   estimator_name: "$\\eta_{\\overline{\\mathrm{BC}}}$"
   color: "#ffffbf"
 phifem-bc-geo:
-  name: "$\\varphi$-FEM, $\\eta$"
-  estimator_name: "$\\eta$"
+  name: "$\\varphi$-FEM, $\\eta_{\\varphi-\\mathrm{FEM}}$"
+  estimator_name: "$\\eta_{\\varphi-\\mathrm{FEM}}$"
   color: "#d7191c"
 fem:
-  name: "FEM, $\\eta_{\\overline{\\mathrm{BC}}{,}\\overline{\\mathrm{geo}}}$"
-  estimator_name: "$\\eta_{\\overline{\\mathrm{BC}}{,}\\overline{\\mathrm{geo}}}$"
+  name: "FEM, $\\eta_{\\mathrm{FEM}}$"
+  estimator_name: "$\\eta_{\\mathrm{FEM}}$"
   color: "#2c7bb6"
 reference:
-  name: "Curved FEM, $\\eta_{\\overline{\\mathrm{BC}}{,}\\overline{\\mathrm{geo}}}$"
+  name: "Curved FEM, $\\eta_{\\mathrm{FEM}}$"
   marker: "o"
 estimator:
   marker: "p"
@@ -48,8 +48,8 @@ boundary_error_h1:
   name: "$|u - \\varphi_h p_h - g_h|_{1,\\Omega}$"
   marker: "o"
   line: "-"
-phi_error:
-  name: "$\\left(\\sum_{T \\in T_h^{\\Gamma}} h_T^{-2} \\|p_h(\\varphi - \\varphi_h)\\|_{0,T \\cap \\Omega}^2\\right)^{1/2}$"
+levelset_error:
+  name: "$\\|\\mathrm{sgn}(\\varphi) - \\mathrm{sgn}(\\varphi_h)\\|_{0, \\mathcal{O}}$"
   marker: "o"
   line: "-"
   color: "#af8dc3"

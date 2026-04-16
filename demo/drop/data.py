@@ -36,7 +36,7 @@ def generate_levelset(mode):
         return val
 
     def phi_ellipse(x):
-        val = 2.0 * (mode.sqrt((0.5 * (x[0] + 3.0)) ** 2 + x[1] ** 2) - 1.0)
+        val = 2.0 * ((0.5 * (x[0] + 3.0)) ** 2 + x[1] ** 2 - 1.0)
         return val
 
     def phi_rectangle(x):

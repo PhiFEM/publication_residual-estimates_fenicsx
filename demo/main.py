@@ -9,6 +9,7 @@ import numpy as np
 import polars as pl
 import yaml
 from basix.ufl import element
+from dolfinx.io import XDMFFile
 from mpi4py import MPI
 from utils import (
     compute_boundary_local_estimators,
@@ -124,13 +125,22 @@ discretize_levelset = parameters["discretize_levelset"]
 single_layer = parameters["single_layer"]
 detection_parameters = [generate_detection_levelset, discretize_levelset, single_layer]
 # Create background mesh
-nx = int(np.abs(bbox[0][1] - bbox[0][0]) / initial_mesh_size / np.sqrt(2.0))
-ny = int(np.abs(bbox[1][1] - bbox[1][0]) / initial_mesh_size / np.sqrt(2.0))
 
-cell_type = dfx.cpp.mesh.CellType.triangle
-mesh = dfx.mesh.create_rectangle(
-    MPI.COMM_WORLD, np.asarray(bbox).T, [nx, ny], cell_type
-)
+# nx = int(np.abs(bbox[0][1] - bbox[0][0]) / initial_mesh_size / np.sqrt(2.0))
+# ny = int(np.abs(bbox[1][1] - bbox[1][0]) / initial_mesh_size / np.sqrt(2.0))
+
+# cell_type = dfx.cpp.mesh.CellType.triangle
+# mesh = dfx.mesh.create_rectangle(
+#     MPI.COMM_WORLD,
+#     np.asarray(bbox).T,
+#     [nx, ny],
+#     cell_type,
+# )
+
+with XDMFFile(
+    MPI.COMM_WORLD, os.path.join("drop/output_uniform/meshes/mesh_01.xdmf"), "r"
+) as fi:
+    mesh = fi.read_mesh()
 
 results = {
     "iteration": [],
@@ -155,6 +165,11 @@ while stopping_criterion:
     levelset_bg_space = dfx.fem.functionspace(mesh, levelset_element)
     write_log(prefix + "Computation of mesh tags")
     results["iteration"].append(i)
+
+    with XDMFFile(
+        mesh.comm, os.path.join(meshes_dir, f"mesh_{str(i).zfill(2)}.xdmf"), "w"
+    ) as of:
+        of.write_mesh(mesh)
 
     data_fcts = {"levelset": generate_levelset}
     if exact_solution_available:

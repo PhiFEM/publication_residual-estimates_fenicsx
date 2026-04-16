@@ -7,7 +7,7 @@ MAX_EXTRA_STEP_UNIF = 2
 
 def generate_levelset(mode):
     def levelset(x):
-        return mode.sqrt(x[0] ** 2 + x[1] ** 2) - 1.0
+        return x[0] ** 2 + x[1] ** 2 - 1.0
 
     return levelset
 

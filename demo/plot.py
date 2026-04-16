@@ -45,7 +45,7 @@ with open(os.path.join(parent_dir, "plot_parameters.yaml"), "rb") as f:
 
 eta_comp = np.all(["eta" in data for data in data_list])
 
-len_min = np.inf
+max_dofs = []
 for parameter in parameters_list:
     demo, param_name = parameter.split(sep="/")
     data_path = os.path.join(
@@ -53,22 +53,33 @@ for parameter in parameters_list:
         "output_" + param_name,
         "results.csv",
     )
-
-    source_dir = os.path.join(parent_dir, demo)
-    sys.path.append(source_dir)
-    from data import MAXIMUM_DOF
-
     df = pl.read_csv(data_path)
     for d in data_list:
-        ys = df[d].to_numpy()
-        d_len = np.logical_not(np.isnan(ys)).astype(int).sum()
-        if d_len < len_min:
-            len_min = d_len
-    xs = df["dof"].to_numpy()
-    d_len = np.less_equal(xs, MAXIMUM_DOF).astype(int).sum()
-    if d_len < len_min:
-        len_min = d_len
+        if d == "estimator":
+            d_name = plot_param[param_name]["estimator_name"]
+        else:
+            d_name = plot_param[d]["name"]
+        try:
+            ys = df[d].to_numpy()
+            y_mask = np.logical_not(np.isnan(ys))
+            xs = df["dof"].to_numpy()[y_mask]
+        except pl.exceptions.ColumnNotFoundError:
+            print(f"{d} not found.")
+            xs = df["dof"].to_numpy()
+            continue
+    max_dofs.append(max(xs))
 
+data_path = os.path.join(
+    demo,
+    "output_" + "fem",
+    "results.csv",
+)
+df = pl.read_csv(data_path)
+ys = df["h10_error"].to_numpy()
+y_mask = np.logical_not(np.isnan(ys))
+xs = df["dof"].to_numpy()[y_mask]
+max_dofs.append(max(xs))
+min_max_dofs = min(max_dofs)
 for parameter in parameters_list:
     demo, param_name = parameter.split(sep="/")
 
@@ -96,27 +107,28 @@ for parameter in parameters_list:
         else:
             d_name = plot_param[d]["name"]
         mstyle = plot_param[d]["marker"]
-        if eta_comp:
-            label = rf"{d_name}"
-        else:
-            label = rf"{d_name} ({scheme_name})"
-        lstyle = plot_param[d]["line"]
-        if eta_comp:
-            color = plot_param[d]["color"]
-        else:
+        y_axis_label = ""
+        if d == "levelset_error":
+            label = rf"({scheme_name}, "
+            y_axis_label = rf"{d_name}"
             color = plot_param[param_name]["color"]
-        len_trunc = len_min
+        else:
+            if eta_comp:
+                label = rf"{d_name}"
+                color = plot_param[d]["color"]
+            else:
+                label = rf"{d_name} ({scheme_name}, "
+                color = plot_param[param_name]["color"]
+        lstyle = plot_param[d]["line"]
         xs = df["dof"].to_numpy()
-        len_dof = np.less_equal(xs, MAXIMUM_DOF).astype(int).sum()
-        len_trunc = np.max([len_min, len_dof])
-        xs = xs[:len_trunc]
         try:
             ys = df[d].to_numpy()
-            # len_trunc = np.max([d_len, len_dof])
-            ys = ys[:len_trunc]
         except pl.exceptions.ColumnNotFoundError:
             print(f"{d} not found.")
             continue
+        dofs_mask = xs <= min_max_dofs
+        xs = xs[dofs_mask]
+        ys = ys[dofs_mask]
         mask = np.isnan(ys)
         xs = xs[~mask]
         ys = ys[~mask]
@@ -126,41 +138,72 @@ for parameter in parameters_list:
             ys_not_zero = False
         if ys_not_zero:
             if rate:
-                trunc_btm = -np.maximum(-(trunc_top - 10), 0)
                 if trunc_top == 0:
+                    trunc_btm = -10
                     a, b = np.polyfit(
                         np.log(xs[trunc_btm:]),
                         np.log(ys[trunc_btm:]),
                         deg=1,
                     )
+                    ax.loglog(
+                        xs[trunc_btm:],
+                        np.exp(b) * xs[trunc_btm:] ** a,
+                        "--",
+                        zorder=2,
+                        color="w",
+                        alpha=0.5,
+                        path_effects=[
+                            pe.Stroke(linewidth=3.0, foreground="k", alpha=0.5),
+                            pe.Normal(),
+                        ],
+                    )
                 else:
+                    trunc_btm = trunc_top - 10
                     a, b = np.polyfit(
                         np.log(xs[trunc_btm:trunc_top]),
                         np.log(ys[trunc_btm:trunc_top]),
                         deg=1,
                     )
-                rate = " (s=" + str(np.round(a, 1)) + ")"
+                    ax.loglog(
+                        xs[trunc_btm:trunc_top],
+                        np.exp(b) * xs[trunc_btm:trunc_top] ** a,
+                        "--",
+                        zorder=2,
+                        color="w",
+                        alpha=0.5,
+                        path_effects=[
+                            pe.Stroke(
+                                linewidth=3.0,
+                                foreground="k",
+                                alpha=0.5,
+                            ),
+                            pe.Normal(),
+                        ],
+                    )
+                rate = "s=" + str(np.round(a, 1)) + ")"
             else:
-                rate = ""
+                rate = ")"
             if trunc_top == 0:
-                plt.loglog(
+                ax.loglog(
                     xs,
                     ys,
                     lstyle + mstyle,
                     c=color,
                     label=label + rate,
+                    zorder=1,
                     path_effects=[
                         pe.Stroke(linewidth=2.5, foreground="#252525"),
                         pe.Normal(),
                     ],
                 )
             else:
-                plt.loglog(
+                ax.loglog(
                     xs[:trunc_top],
                     ys[:trunc_top],
                     lstyle + mstyle,
                     c=color,
                     label=label + rate,
+                    zorder=1,
                     path_effects=[
                         pe.Stroke(linewidth=2.5, foreground="#252525"),
                         pe.Normal(),
@@ -170,6 +213,7 @@ for parameter in parameters_list:
             continue
 
 plt.xlabel("dof")
+plt.ylabel(y_axis_label)
 plt.legend(prop={"size": plot_param["legend_text_size"]})
 plt.savefig(
     os.path.join(

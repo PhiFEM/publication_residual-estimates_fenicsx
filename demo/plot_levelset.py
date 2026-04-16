@@ -48,7 +48,28 @@ ax = fig.subplots()
 ax.contourf(X, Y, Z, levels=[-10, 0], colors=["lightblue"])
 ax.contour(X, Y, Z, levels=[0], colors="black", linewidths=1.25)
 
-ax.set_xlim([bbox[0][0], bbox[0][1]])
-ax.set_ylim([bbox[1][0], bbox[1][1]])
-plt.gca().set_aspect("equal")
-plt.savefig(os.path.join(demo, "levelset"), dpi=500, bbox_inches="tight")
+# ax.set_xlim([bbox[0][0], bbox[0][1]])
+# ax.set_ylim([bbox[1][0], bbox[1][1]])
+# plt.gca().set_aspect("equal")
+# plt.savefig(os.path.join(demo, "levelset"), dpi=500, bbox_inches="tight")
+
+detection = True
+try:
+    from data import generate_detection_levelset
+
+    levelset = generate_detection_levelset(np)
+except ImportError:
+    detection = False
+
+if detection:
+    z_detect = levelset(XY)
+    Z_detect = z_detect.reshape(X.shape)
+    # fig = plt.figure()
+    # ax = fig.subplots()
+    ax.contourf(X, Y, Z_detect, levels=[-10, 0], colors=["lightblue"])
+    ax.contour(X, Y, Z_detect, levels=[0], colors="red", linewidths=1.25)
+
+    ax.set_xlim([bbox[0][0], bbox[0][1]])
+    ax.set_ylim([bbox[1][0], bbox[1][1]])
+    plt.gca().set_aspect("equal")
+    plt.savefig(os.path.join(demo, "detection_levelset"), dpi=500, bbox_inches="tight")

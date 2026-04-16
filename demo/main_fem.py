@@ -187,15 +187,15 @@ while stopping_criterion:
     if not stopping_criterion:
         break
 
-    unif_refinement = (refinement == "unif" and not dof_num_criterion) or (
-        extra_unif_step < MAX_EXTRA_STEP_UNIF and extra_adap_step >= MAX_EXTRA_STEP_ADAP
-    )
-    adap_refinement = (refinement == "adap" and not dof_num_criterion) or (
-        extra_adap_step < MAX_EXTRA_STEP_ADAP
-    )
+    # unif_refinement = (refinement == "unif" and not dof_num_criterion) or (
+    #     extra_unif_step < MAX_EXTRA_STEP_UNIF and extra_adap_step >= MAX_EXTRA_STEP_ADAP
+    # )
+    # adap_refinement = (refinement == "adap" and not dof_num_criterion) or (
+    #     extra_adap_step < MAX_EXTRA_STEP_ADAP
+    # )
 
     # Marking and refinement
-    if unif_refinement:
+    if refinement == "unif":
         write_log(prefix + "Refinement.")
         mesh = geoModel.refineMarkedElements(tdim, all_cells)[0]
         if not dof_num_criterion:
@@ -203,7 +203,7 @@ while stopping_criterion:
             extra_unif_step += 1
         adap_refinement = False
 
-    if adap_refinement:
+    if refinement == "adap":
         write_log(prefix + "Marking.")
         cells_indices = marking(est_h, dorfler_param)[1]
         write_log(prefix + "Refinement.")
